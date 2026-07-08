@@ -29,6 +29,29 @@ function speak(text) {
   });
 }
 
+// sentenceオブジェクト({text, audioUrl})を受け取り、MP3があればMP3を、なければTTSを再生する
+function playSentenceAudio(sentenceObj) {
+  return new Promise((resolve) => {
+    if (sentenceObj.audioUrl) {
+      const audio = new Audio(sentenceObj.audioUrl);
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      audio.onended = finish;
+      audio.onerror = () => {
+        // MP3の読み込みに失敗したらTTSにフォールバック
+        speak(sentenceObj.text).then(finish);
+      };
+      audio.play().catch(() => speak(sentenceObj.text).then(finish));
+    } else {
+      speak(sentenceObj.text).then(resolve);
+    }
+  });
+}
+
 // 正解した時の「ピコン」という短い8bit風の音
 function playCorrectSound() {
   try {
@@ -255,7 +278,7 @@ export default function App() {
           sentences: [],
         };
       }
-      grouped[row.unit].sentences.push(row.correct_text);
+      grouped[row.unit].sentences.push({ text: row.correct_text, audioUrl: row.audio_url || null });
     }
     setUnits(Object.values(grouped));
   }
@@ -507,7 +530,7 @@ function BlockPractice({ unit, level, onBack, onAllComplete, recordDictationAnsw
         sentence={sentences[idx]}
         onBack={onBack}
         onCorrect={(attemptCount) => {
-          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx], isCorrect: true, attemptCount });
+          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx].text, isCorrect: true, attemptCount });
           advance();
         }}
         buttonLabel={idx + 1 >= sentences.length ? "完了！レベル選択へ" : "次の文へ"}
@@ -579,7 +602,7 @@ function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete
         sentence={sentence}
         onBack={onBack}
         onCorrect={(attemptCount) => {
-          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence, isCorrect: true, attemptCount });
+          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence.text, isCorrect: true, attemptCount });
           goNextStage();
         }}
         buttonLabel="オーバーラッピングへ進む"
@@ -619,7 +642,7 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
   }, [sentence]);
 
   function check() {
-    if (normalize(input) === normalize(sentence)) {
+    if (normalize(input) === normalize(sentence.text)) {
       setStatus("correct");
       setCelebrate(true);
       playCorrectSound();
@@ -636,7 +659,7 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
       <CelebrationOverlay show={celebrate} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
-      <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => speak(sentence)}>🔊 きく</button>
+      <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => playSentenceAudio(sentence)}>🔊 きく</button>
       <textarea
         style={styles.textarea}
         placeholder="聞こえた英文を入力しよう"
@@ -651,7 +674,7 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
       {missCount >= 5 && !showAnswer && (
         <button className="pxbtn" style={styles.hintBtn} onClick={() => setShowAnswer(true)}>答えを見る（5回間違えたので）</button>
       )}
-      {showAnswer && <div style={styles.answerBox}>{sentence}</div>}
+      {showAnswer && <div style={styles.answerBox}>{sentence.text}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {status !== "correct" ? (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
@@ -731,7 +754,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     recorder.start();
 
     const ttsStart = performance.now();
-    await speak(sentence);
+    await playSentenceAudio(sentence);
     const ttsDurationSec = (performance.now() - ttsStart) / 1000;
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -751,7 +774,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
     const volumeFlag = avgVolume < 8;
     const durationFlag = durationSec < ttsDurationSec * 0.5;
-    const wordMatch = recognizer ? wordMatchDetail(recognizedText, sentence) : null;
+    const wordMatch = recognizer ? wordMatchDetail(recognizedText, sentence.text) : null;
 
     const blob = new Blob(chunks, { type: "audio/webm" });
 
@@ -788,7 +811,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
 
       {showText ? (
-        <div style={styles.sentenceBox}>{sentence}</div>
+        <div style={styles.sentenceBox}>{sentence.text}</div>
       ) : (
         <div style={{ ...styles.sentenceBox, color: PALETTE.tanDark }}>（文字なし・音声だけをたよりに）</div>
       )}

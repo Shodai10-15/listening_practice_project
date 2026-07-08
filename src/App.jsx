@@ -5,15 +5,12 @@ import mascotLying from "./assets/mascot-lying.png";
 
 // ============================================================
 // Supabase接続設定
-// Vercelの環境変数に VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY を
-// 設定してください（Supabaseのプロジェクト設定 > API から取得）
 // ============================================================
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// 単元の表示名（英文本体・practice_modeはSupabaseから取得）
 const UNIT_META = {
   U3G1: { label: "Unit3-G1", sub: "Anna & Ms. Chen" },
   U3G2: { label: "Unit3-G2", sub: "文房具クイズ" },
@@ -30,6 +27,28 @@ function speak(text) {
     u.onerror = resolve;
     window.speechSynthesis.speak(u);
   });
+}
+
+// 正解した時の「ピコン」という短い8bit風の音
+function playCorrectSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const notes = [660, 880, 1320];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      gain.gain.value = 0.06;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const start = ctx.currentTime + i * 0.09;
+      osc.start(start);
+      gain.gain.setValueAtTime(0.06, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.15);
+      osc.stop(start + 0.16);
+    });
+  } catch (e) {}
 }
 
 function normalize(s) {
@@ -61,12 +80,37 @@ function freshProgress() {
 function GlobalPixelStyle() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-      .pxfont { font-family: 'Press Start 2P', 'Hiragino Sans', 'Yu Gothic', sans-serif; }
+      @font-face {
+        font-family: 'MisakiGothic';
+        src: url('https://cdn.leafscape.be/misaki/misaki_gothic_web.woff2') format('woff2');
+        font-display: swap;
+      }
+      html, body, #root { height: 100%; margin: 0; }
+      .pxfont { font-family: 'MisakiGothic', 'Hiragino Sans', 'Yu Gothic', sans-serif; letter-spacing: 0.5px; }
       .pxfont-body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; }
       .pxbtn:active { transform: translate(3px, 3px); box-shadow: none !important; }
       .pxbtn:disabled { cursor: not-allowed; }
       .mascot-img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges; }
+
+      @keyframes popIn {
+        0% { transform: scale(0.2) translateY(30px); opacity: 0; }
+        55% { transform: scale(1.2) translateY(-8px); opacity: 1; }
+        75% { transform: scale(0.95) translateY(2px); }
+        100% { transform: scale(1) translateY(0); opacity: 1; }
+      }
+      @keyframes flashBg {
+        0% { opacity: 0; }
+        15% { opacity: 1; }
+        100% { opacity: 1; }
+      }
+      @keyframes burstOut {
+        0% { transform: translate(0,0) scale(0.4) rotate(0deg); opacity: 1; }
+        100% { transform: translate(var(--tx), var(--ty)) scale(1.3) rotate(90deg); opacity: 0; }
+      }
+      @keyframes bannerPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+      }
     `}</style>
   );
 }
@@ -85,11 +129,90 @@ function MascotBubble({ image, children, size = 64 }) {
   );
 }
 
+// 練習画面の隅にいつも居る、小さいマスコット
+function CornerMascot() {
+  return (
+    <img
+      src={mascotSitting}
+      alt=""
+      className="mascot-img"
+      style={{ position: "absolute", top: -14, right: -10, width: 46, height: 46, opacity: 0.95 }}
+    />
+  );
+}
+
+// 正解した瞬間に、短時間だけ出る演出
+function CelebrationOverlay({ show }) {
+  if (!show) return null;
+  const stars = [
+    { tx: "-60px", ty: "-50px", delay: "0s" },
+    { tx: "60px", ty: "-55px", delay: "0.05s" },
+    { tx: "-70px", ty: "10px", delay: "0.1s" },
+    { tx: "70px", ty: "15px", delay: "0.08s" },
+    { tx: "0px", ty: "-70px", delay: "0.03s" },
+    { tx: "0px", ty: "60px", delay: "0.12s" },
+  ];
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(247, 236, 216, 0.88)",
+        animation: "flashBg 0.15s ease-out",
+        zIndex: 20,
+        pointerEvents: "none",
+      }}
+    >
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {stars.map((s, i) => (
+          <span
+            key={i}
+            style={{
+              position: "absolute",
+              top: "40%",
+              left: "50%",
+              fontSize: 22,
+              "--tx": s.tx,
+              "--ty": s.ty,
+              animation: `burstOut 0.7s ease-out ${s.delay} forwards`,
+            }}
+          >
+            ✦
+          </span>
+        ))}
+        <img
+          src={mascotSitting}
+          alt=""
+          className="mascot-img"
+          style={{ width: 88, height: 88, animation: "popIn 0.5s ease-out" }}
+        />
+        <div
+          className="pxfont"
+          style={{
+            marginTop: 10,
+            padding: "8px 16px",
+            background: PALETTE.ink,
+            color: PALETTE.cream,
+            fontSize: 14,
+            border: `2px solid ${PALETTE.ink}`,
+            animation: "bannerPulse 0.5s ease-in-out 0.2s 2",
+          }}
+        >
+          せいかい！
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [classNo, setClassNo] = useState("");
   const [confirmedClassNo, setConfirmedClassNo] = useState(null);
 
-  const [units, setUnits] = useState(null); // Supabaseから取得
+  const [units, setUnits] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
   const [screen, setScreen] = useState("units");
@@ -147,7 +270,6 @@ export default function App() {
     return false;
   }
 
-  // ---- Supabase書き込み ----
   async function recordDictationAnswer({ unitId, sentenceNo, answerText, isCorrect, attemptCount }) {
     await supabase.from("dictation_answers").insert({
       class_no: confirmedClassNo,
@@ -188,57 +310,42 @@ export default function App() {
     });
   }
 
+  let inner;
   if (!confirmedClassNo) {
-    return (
-      <div style={styles.page}>
-        <GlobalPixelStyle />
-        <div style={styles.card}>
-          <MascotBubble image={mascotSitting}>しゅっせきばんごうを おしえてね！</MascotBubble>
-          <h1 className="pxfont" style={styles.h1}>出席番号</h1>
-          <p style={styles.modeNote}>例：2組15番 → 2-15</p>
-          <input
-            style={styles.textInput}
-            placeholder="2-15"
-            value={classNo}
-            onChange={(e) => setClassNo(e.target.value)}
-          />
-          <button
-            className="pxbtn pxfont"
-            style={styles.primaryBtn}
-            onClick={() => classNo.trim() && setConfirmedClassNo(classNo.trim())}
-          >
-            はじめる
-          </button>
-        </div>
+    inner = (
+      <div style={styles.card}>
+        <MascotBubble image={mascotSitting}>しゅっせきばんごうを おしえてね！</MascotBubble>
+        <h1 className="pxfont" style={styles.h1}>出席番号</h1>
+        <p style={styles.modeNote}>例：2組15番 → 2-15</p>
+        <input
+          style={styles.textInput}
+          placeholder="2-15"
+          value={classNo}
+          onChange={(e) => setClassNo(e.target.value)}
+        />
+        <button
+          className="pxbtn pxfont"
+          style={styles.primaryBtn}
+          onClick={() => classNo.trim() && setConfirmedClassNo(classNo.trim())}
+        >
+          はじめる
+        </button>
       </div>
     );
-  }
-
-  if (loadError) {
-    return (
-      <div style={styles.page}>
-        <GlobalPixelStyle />
-        <div style={styles.card}>
-          <p style={{ color: "#b33a3a" }}>データの取得でエラーが出ました：{loadError}</p>
-        </div>
+  } else if (loadError) {
+    inner = (
+      <div style={styles.card}>
+        <p style={{ color: "#b33a3a" }}>データの取得でエラーが出ました：{loadError}</p>
       </div>
     );
-  }
-
-  if (!units) {
-    return (
-      <div style={styles.page}>
-        <GlobalPixelStyle />
-        <div style={styles.card}>
-          <p>読み込み中…</p>
-        </div>
+  } else if (!units) {
+    inner = (
+      <div style={styles.card}>
+        <p>読み込み中…</p>
       </div>
     );
-  }
-
-  return (
-    <div style={styles.page}>
-      <GlobalPixelStyle />
+  } else {
+    inner = (
       <div style={styles.card}>
         {screen === "units" && <UnitSelect units={units} onSelect={openUnit} />}
 
@@ -292,6 +399,19 @@ export default function App() {
             }}
           />
         )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.page}>
+      <GlobalPixelStyle />
+      <div style={styles.shell}>
+        <div style={styles.shellTopRow}>
+          <span style={styles.powerDot} />
+          <span className="pxfont" style={styles.shellLabel}>LISTENING</span>
+        </div>
+        <div style={styles.screenBezel}>{inner}</div>
       </div>
     </div>
   );
@@ -349,7 +469,7 @@ function BlockLevelSelect({ unit, unitProgress, levelUnlocked, onBack, onSelect 
               onClick={() => unlocked && onSelect(key)}
             >
               <span style={{ flex: 1, textAlign: "left" }}>{meta.label}</span>
-              {done && <span style={styles.doneBadge}>CLEAR</span>}
+              {done && <span className="pxfont" style={styles.doneBadge}>CLEAR</span>}
               {!unlocked && <span style={styles.lockBadge}>🔒</span>}
             </button>
           );
@@ -479,24 +599,32 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
   const [status, setStatus] = useState(null);
   const [missCount, setMissCount] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [celebrate, setCelebrate] = useState(false);
 
   useEffect(() => {
     setInput("");
     setStatus(null);
     setMissCount(0);
     setShowAnswer(false);
+    setCelebrate(false);
   }, [sentence]);
 
   function check() {
-    if (normalize(input) === normalize(sentence)) setStatus("correct");
-    else {
+    if (normalize(input) === normalize(sentence)) {
+      setStatus("correct");
+      setCelebrate(true);
+      playCorrectSound();
+      setTimeout(() => setCelebrate(false), 1100);
+    } else {
       setStatus("wrong");
       setMissCount((c) => c + 1);
     }
   }
 
   return (
-    <div>
+    <div style={{ position: "relative" }}>
+      <CornerMascot />
+      <CelebrationOverlay show={celebrate} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
       <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => speak(sentence)}>🔊 きく</button>
@@ -530,8 +658,8 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
   const [attempts, setAttempts] = useState(0);
   const [recording, setRecording] = useState(false);
   const [flags, setFlags] = useState([]);
-  const [lastRec, setLastRec] = useState(null); // 提出用データ
-  const [history, setHistory] = useState([]); // フィードバック用の全試行履歴
+  const [lastRec, setLastRec] = useState(null);
+  const [history, setHistory] = useState([]);
   const [micError, setMicError] = useState(null);
 
   useEffect(() => {
@@ -565,7 +693,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     const source = audioCtx.createMediaStreamSource(stream);
     source.connect(analyser);
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    const volumeSamples = []; // 0.2秒ごとの音量を全部記録(平均チェック＋発話時間の推定に使う)
+    const volumeSamples = [];
     const volumeTimer = setInterval(() => {
       analyser.getByteFrequencyData(dataArray);
       const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
@@ -594,10 +722,10 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     recorder.start();
 
     const ttsStart = performance.now();
-    await speak(sentence); // 音声再生と同時に録音中
+    await speak(sentence);
     const ttsDurationSec = (performance.now() - ttsStart) / 1000;
 
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // 読み終わりに1秒の余裕
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     recorder.stop();
     if (recognizer) recognizer.stop();
@@ -610,7 +738,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
     const durationSec = (Date.now() - startTime) / 1000;
     const avgVolume = volumeSamples.length ? volumeSamples.reduce((a, b) => a + b, 0) / volumeSamples.length : 0;
-    const activeSpeechSec = volumeSamples.filter((v) => v > 12).length * 0.2; // 声が出ていたおおよその時間
+    const activeSpeechSec = volumeSamples.filter((v) => v > 12).length * 0.2;
 
     const volumeFlag = avgVolume < 8;
     const durationFlag = durationSec < ttsDurationSec * 0.5;
@@ -645,7 +773,8 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
   }
 
   return (
-    <div>
+    <div style={{ position: "relative" }}>
+      <CornerMascot />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
 
@@ -730,33 +859,56 @@ function FeedbackPanel({ history }) {
 
 // ---------------- GB風カラーパレット ----------------
 const PALETTE = {
-  bg: "#2b2440",        // 本体の外側(ゲーム機のボディ風)
-  screenEdge: "#14213d", // 画面の縁(濃紺)
-  cream: "#f7ecd8",      // マスコットのベースカラーに合わせたクリーム
-  tan: "#d8b98a",        // マスコットの陰影色
+  bg: "#241f38",
+  shellBody: "#8a86a8",     // ゲーム機本体のプラスチック色
+  shellBodyDark: "#6d698a",
+  screenEdge: "#14213d",
+  cream: "#f7ecd8",
+  tan: "#d8b98a",
   tanDark: "#a9865a",
-  ink: "#1f2233",        // 文字・輪郭(ほぼ黒に近い紺)
+  ink: "#1f2233",
 };
 
 const styles = {
   page: {
-    minHeight: 560,
+    minHeight: "100vh",
+    width: "100%",
+    boxSizing: "border-box",
     background: PALETTE.bg,
     display: "flex",
+    alignItems: "center",
     justifyContent: "center",
     padding: "24px 12px",
     fontFamily: "'Hiragino Sans', 'Yu Gothic', sans-serif",
   },
+  shell: {
+    width: "100%",
+    maxWidth: 500,
+    background: PALETTE.shellBody,
+    borderRadius: 28,
+    padding: "18px 18px 26px",
+    boxShadow: `0 10px 0 ${PALETTE.shellBodyDark}, 0 14px 24px rgba(0,0,0,0.35)`,
+  },
+  shellTopRow: { display: "flex", alignItems: "center", gap: 8, padding: "2px 6px 14px" },
+  powerDot: { width: 8, height: 8, borderRadius: "50%", background: "#e0453f", boxShadow: "0 0 4px #e0453f" },
+  shellLabel: { fontSize: 10, color: "#3b3752" },
+  screenBezel: {
+    background: PALETTE.screenEdge,
+    borderRadius: 10,
+    padding: 10,
+  },
   card: {
     width: "100%",
-    maxWidth: 460,
+    maxHeight: "78vh",
+    overflowY: "auto",
+    boxSizing: "border-box",
     background: PALETTE.cream,
     border: `4px solid ${PALETTE.ink}`,
-    boxShadow: `6px 6px 0 ${PALETTE.screenEdge}`,
     padding: "22px 20px",
+    position: "relative",
   },
   h1: { fontSize: 15, lineHeight: 1.8, margin: "0 0 14px", color: PALETTE.ink },
-  h1sm: { fontSize: 12, lineHeight: 1.8, margin: "0 0 10px", color: PALETTE.ink },
+  h1sm: { fontSize: 13, lineHeight: 1.8, margin: "0 0 10px", color: PALETTE.ink },
   h1sub: { fontSize: 14, fontWeight: 400, color: PALETTE.tanDark, marginLeft: 8 },
   grid: { display: "flex", flexDirection: "column", gap: 12 },
   unitBtn: {
@@ -788,13 +940,7 @@ const styles = {
     background: "#fff",
     fontSize: 14,
   },
-  doneBadge: {
-    fontSize: 10,
-    fontFamily: "'Press Start 2P', sans-serif",
-    background: PALETTE.ink,
-    color: PALETTE.cream,
-    padding: "4px 8px",
-  },
+  doneBadge: { fontSize: 10, background: PALETTE.ink, color: PALETTE.cream, padding: "4px 8px" },
   lockBadge: { fontSize: 14 },
   progressText: { fontSize: 13, color: PALETTE.tanDark, marginBottom: 14 },
   modeNote: { fontSize: 12, color: PALETTE.tanDark, marginTop: 16, marginBottom: 16, lineHeight: 1.6 },
@@ -866,3 +1012,4 @@ const styles = {
     position: "relative",
   },
 };
+

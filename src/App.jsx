@@ -495,7 +495,13 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
     } catch (e) {
       setMicError("マイクが使えませんでした。マイクの許可を確認してください。");
       setRecording(false);
@@ -541,6 +547,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     const startTime = Date.now();
     recorder.start();
     await speak(sentence); // 音声再生と同時に録音中
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // 読み終わりに1秒の余裕を持たせる
 
     recorder.stop();
     if (recognizer) recognizer.stop();

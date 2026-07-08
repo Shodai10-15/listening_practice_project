@@ -34,13 +34,13 @@ function normalize(s) {
   return s.toLowerCase().replace(/[.,!?]/g, "").replace(/\s+/g, " ").trim();
 }
 
-function wordOverlapScore(a, b) {
-  const wa = normalize(a).split(" ").filter(Boolean);
-  const wb = normalize(b).split(" ").filter(Boolean);
+function wordMatchDetail(recognizedText, target) {
+  const wa = normalize(recognizedText).split(" ").filter(Boolean);
+  const wb = normalize(target).split(" ").filter(Boolean);
   if (wb.length === 0) return null;
   const setA = new Set(wa);
-  const hit = wb.filter((w) => setA.has(w)).length;
-  return Math.round((hit / wb.length) * 100) / 100;
+  const matched = wb.filter((w) => setA.has(w)).length;
+  return { matched, total: wb.length, ratio: Math.round((matched / wb.length) * 100) / 100 };
 }
 
 const LEVEL_META = {
@@ -476,13 +476,15 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
   const [attempts, setAttempts] = useState(0);
   const [recording, setRecording] = useState(false);
   const [flags, setFlags] = useState([]);
-  const [lastRec, setLastRec] = useState(null); // {blob, durationSec, volumeFlag, durationFlag, matchScore}
+  const [lastRec, setLastRec] = useState(null); // 提出用データ
+  const [history, setHistory] = useState([]); // フィードバック用の全試行履歴
   const [micError, setMicError] = useState(null);
 
   useEffect(() => {
     setAttempts(0);
     setFlags([]);
     setLastRec(null);
+    setHistory([]);
     setMicError(null);
   }, [sentence, showText]);
 
@@ -496,11 +498,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
     } catch (e) {
       setMicError("マイクが使えませんでした。マイクの許可を確認してください。");
@@ -508,22 +506,18 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
       return;
     }
 
-    // 音量チェック用
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const analyser = audioCtx.createAnalyser();
     const source = audioCtx.createMediaStreamSource(stream);
     source.connect(analyser);
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    let volumeSum = 0;
-    let volumeSamples = 0;
+    const volumeSamples = []; // 0.2秒ごとの音量を全部記録(平均チェック＋発話時間の推定に使う)
     const volumeTimer = setInterval(() => {
       analyser.getByteFrequencyData(dataArray);
       const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-      volumeSum += avg;
-      volumeSamples += 1;
+      volumeSamples.push(avg);
     }, 200);
 
-    // 音声認識(対応ブラウザのみ)
     let recognizedText = "";
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognizer = null;
@@ -533,9 +527,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
       recognizer.continuous = true;
       recognizer.interimResults = false;
       recognizer.onresult = (e) => {
-        for (let i = 0; i < e.results.length; i++) {
-          recognizedText += " " + e.results[i][0].transcript;
-        }
+        for (let i = 0; i < e.results.length; i++) recognizedText += " " + e.results[i][0].transcript;
       };
       recognizer.start();
     }
@@ -546,27 +538,29 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
     const startTime = Date.now();
     recorder.start();
+
+    const ttsStart = performance.now();
     await speak(sentence); // 音声再生と同時に録音中
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // 読み終わりに1秒の余裕を持たせる
+    const ttsDurationSec = (performance.now() - ttsStart) / 1000;
+
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // 読み終わりに1秒の余裕
 
     recorder.stop();
     if (recognizer) recognizer.stop();
     clearInterval(volumeTimer);
 
-    await new Promise((resolve) => {
-      recorder.onstop = resolve;
-    });
+    await new Promise((resolve) => { recorder.onstop = resolve; });
 
     stream.getTracks().forEach((t) => t.stop());
     audioCtx.close();
 
     const durationSec = (Date.now() - startTime) / 1000;
-    const expectedSec = Math.max(1.2, sentence.length * 0.06);
-    const avgVolume = volumeSamples ? volumeSum / volumeSamples : 0;
+    const avgVolume = volumeSamples.length ? volumeSamples.reduce((a, b) => a + b, 0) / volumeSamples.length : 0;
+    const activeSpeechSec = volumeSamples.filter((v) => v > 12).length * 0.2; // 声が出ていたおおよその時間
 
-    const volumeFlag = avgVolume < 8; // しきい値は運用しながら調整
-    const durationFlag = durationSec < expectedSec * 0.5;
-    const matchScore = recognizer ? wordOverlapScore(recognizedText, sentence) : null;
+    const volumeFlag = avgVolume < 8;
+    const durationFlag = durationSec < ttsDurationSec * 0.5;
+    const wordMatch = recognizer ? wordMatchDetail(recognizedText, sentence) : null;
 
     const blob = new Blob(chunks, { type: "audio/webm" });
 
@@ -574,9 +568,13 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
     if (volumeFlag) newFlags.push("音が小さいかも");
     if (durationFlag) newFlags.push("時間が短いかも");
 
+    const attemptNo = attempts + 1;
+    const record = { attemptNo, wordMatch, activeSpeechSec, ttsDurationSec };
+
     setFlags(newFlags);
-    setLastRec({ blob, durationSec, volumeFlag, durationFlag, matchScore });
-    setAttempts((a) => a + 1);
+    setHistory((h) => [...h, record]);
+    setLastRec({ blob, durationSec, volumeFlag, durationFlag, matchScore: wordMatch ? wordMatch.ratio : null });
+    setAttempts(attemptNo);
     setRecording(false);
   }
 
@@ -620,6 +618,8 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
         </div>
       )}
 
+      <FeedbackPanel history={history} />
+
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {canSubmit ? (
           <button style={styles.primaryBtn} onClick={handleSubmit}>{buttonLabel}</button>
@@ -627,6 +627,48 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
           <div style={styles.hintText}>あと{3 - attempts}回、録音してみよう</div>
         )}
       </div>
+    </div>
+  );
+}
+
+function FeedbackPanel({ history }) {
+  if (history.length === 0) return null;
+  const latest = history[history.length - 1];
+  const first = history[0];
+
+  const tempoGap = Math.abs(latest.activeSpeechSec - latest.ttsDurationSec);
+  const tempoText =
+    tempoGap < 0.4
+      ? "テンポ：お手本とほぼ同じ速さだったよ！"
+      : latest.activeSpeechSec > latest.ttsDurationSec
+      ? `テンポ：お手本より${tempoGap.toFixed(1)}秒長かったよ`
+      : `テンポ：お手本より${tempoGap.toFixed(1)}秒短かったよ`;
+
+  const wordText = latest.wordMatch
+    ? `単語：${latest.wordMatch.total}語中${latest.wordMatch.matched}語 聞き取れたよ！`
+    : null;
+
+  const showGrowth = history.length >= 2;
+  const firstTempoGap = Math.abs(first.activeSpeechSec - first.ttsDurationSec);
+  const growthLines = [];
+  if (showGrowth && first.wordMatch && latest.wordMatch) {
+    const diff = latest.wordMatch.matched - first.wordMatch.matched;
+    if (diff > 0) growthLines.push(`1回目より${diff}語多く聞き取れたよ`);
+    else if (diff === 0) growthLines.push("1回目と同じくらい聞き取れてるよ");
+  }
+  if (showGrowth && tempoGap < firstTempoGap - 0.1) {
+    growthLines.push("テンポもお手本に近づいてきたね");
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: "#eef2fb" }}>
+      {wordText && <p style={{ margin: "0 0 6px", fontSize: 14, color: "#1e4e8c" }}>{wordText}</p>}
+      <p style={{ margin: "0 0 6px", fontSize: 14, color: "#1e4e8c" }}>{tempoText}</p>
+      {growthLines.map((line, i) => (
+        <p key={i} style={{ margin: "6px 0 0", fontSize: 14, color: "#1c7a4d", fontWeight: 700 }}>
+          ✨ {line}
+        </p>
+      ))}
     </div>
   );
 }

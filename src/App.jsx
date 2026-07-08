@@ -78,6 +78,35 @@ function normalize(s) {
   return s.toLowerCase().replace(/[.,!?]/g, "").replace(/\s+/g, " ").trim();
 }
 
+// 2つの単語がどれくらい違うか(挿入・削除・置換の合計回数)を計算する
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) dp[i][j] = dp[i - 1][j - 1];
+      else dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// 語数が同じで、各単語のズレが許容範囲(既定2文字)以内なら「正解」とみなす
+function isCloseEnough(input, target, tolerance = 2) {
+  const wordsA = normalize(input).split(" ").filter(Boolean);
+  const wordsB = normalize(target).split(" ").filter(Boolean);
+  if (wordsA.length !== wordsB.length) return { ok: false, hadTypo: false };
+  let hadTypo = false;
+  for (let i = 0; i < wordsB.length; i++) {
+    const dist = editDistance(wordsA[i], wordsB[i]);
+    if (dist > tolerance) return { ok: false, hadTypo: false };
+    if (dist > 0) hadTypo = true;
+  }
+  return { ok: true, hadTypo };
+}
+
 // 全角の数字・記号を半角に変換する（出席番号の入力ゆれ対策）
 function toHalfWidth(str) {
   return str
@@ -628,7 +657,7 @@ function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete
 
 function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel }) {
   const [input, setInput] = useState("");
-  const [status, setStatus] = useState(null);
+  const [status, setStatus] = useState(null); // null | 'correct' | 'close' | 'wrong'
   const [missCount, setMissCount] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
@@ -642,8 +671,9 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
   }, [sentence]);
 
   function check() {
-    if (normalize(input) === normalize(sentence.text)) {
-      setStatus("correct");
+    const result = isCloseEnough(input, sentence.text);
+    if (result.ok) {
+      setStatus(result.hadTypo ? "close" : "correct");
       setCelebrate(true);
       playCorrectSound();
       setTimeout(() => setCelebrate(false), 1100);
@@ -670,13 +700,19 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
         }}
       />
       {status === "correct" && <div style={{ ...styles.feedback, background: PALETTE.cream, borderColor: PALETTE.ink, color: PALETTE.ink }}>◯ 正解！</div>}
+      {status === "close" && (
+        <div style={{ ...styles.feedback, background: "#fbeecb", borderColor: PALETTE.tanDark, color: "#7a5a1e" }}>
+          ◯ 正解！（おしいスペルミスがあったよ。正しいつづりも見ておこう）
+          <div style={{ marginTop: 8, fontWeight: 700 }}>{sentence.text}</div>
+        </div>
+      )}
       {status === "wrong" && <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c" }}>✗ ちがうよ。もう一度聞いて挑戦しよう</div>}
       {missCount >= 5 && !showAnswer && (
         <button className="pxbtn" style={styles.hintBtn} onClick={() => setShowAnswer(true)}>答えを見る（5回間違えたので）</button>
       )}
       {showAnswer && <div style={styles.answerBox}>{sentence.text}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-        {status !== "correct" ? (
+        {status !== "correct" && status !== "close" ? (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
         ) : (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={() => onCorrect(missCount + 1)}>{buttonLabel}</button>

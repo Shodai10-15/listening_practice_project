@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
+import mascotSitting from "./assets/mascot-sitting.png";
+import mascotLying from "./assets/mascot-lying.png";
 
 // ============================================================
 // Supabase接続設定
@@ -44,14 +46,43 @@ function wordMatchDetail(recognizedText, target) {
 }
 
 const LEVEL_META = {
-  dictation: { label: "① ディクテーション", icon: "✍️" },
-  overlap: { label: "② オーバーラッピング", icon: "🗣" },
-  shadow: { label: "③ シャドーイング", icon: "👥" },
+  dictation: { label: "① ディクテーション" },
+  overlap: { label: "② オーバーラッピング" },
+  shadow: { label: "③ シャドーイング" },
 };
 const LEVEL_ORDER = ["dictation", "overlap", "shadow"];
 
 function freshProgress() {
   return { dictation: false, overlap: false, shadow: false, perIndex: 0, perStage: "dictation" };
+}
+
+// ---------------- GB風の共通見た目パーツ ----------------
+
+function GlobalPixelStyle() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+      .pxfont { font-family: 'Press Start 2P', 'Hiragino Sans', 'Yu Gothic', sans-serif; }
+      .pxfont-body { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; }
+      .pxbtn:active { transform: translate(3px, 3px); box-shadow: none !important; }
+      .pxbtn:disabled { cursor: not-allowed; }
+      .mascot-img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges; }
+    `}</style>
+  );
+}
+
+// キャラクターとセリフウィンドウをセットで出すパーツ
+function MascotBubble({ image, children, size = 64 }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16 }}>
+      <img src={image} alt="マスコット" className="mascot-img" style={{ width: size, height: size, flexShrink: 0 }} />
+      <div style={styles.speechBubble}>
+        <p className="pxfont-body" style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: PALETTE.ink }}>
+          {children}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -160,8 +191,10 @@ export default function App() {
   if (!confirmedClassNo) {
     return (
       <div style={styles.page}>
+        <GlobalPixelStyle />
         <div style={styles.card}>
-          <h1 style={styles.h1}>出席番号を入力してね</h1>
+          <MascotBubble image={mascotSitting}>しゅっせきばんごうを おしえてね！</MascotBubble>
+          <h1 className="pxfont" style={styles.h1}>出席番号</h1>
           <p style={styles.modeNote}>例：2組15番 → 2-15</p>
           <input
             style={styles.textInput}
@@ -170,6 +203,7 @@ export default function App() {
             onChange={(e) => setClassNo(e.target.value)}
           />
           <button
+            className="pxbtn pxfont"
             style={styles.primaryBtn}
             onClick={() => classNo.trim() && setConfirmedClassNo(classNo.trim())}
           >
@@ -183,6 +217,7 @@ export default function App() {
   if (loadError) {
     return (
       <div style={styles.page}>
+        <GlobalPixelStyle />
         <div style={styles.card}>
           <p style={{ color: "#b33a3a" }}>データの取得でエラーが出ました：{loadError}</p>
         </div>
@@ -193,6 +228,7 @@ export default function App() {
   if (!units) {
     return (
       <div style={styles.page}>
+        <GlobalPixelStyle />
         <div style={styles.card}>
           <p>読み込み中…</p>
         </div>
@@ -202,6 +238,7 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      <GlobalPixelStyle />
       <div style={styles.card}>
         {screen === "units" && <UnitSelect units={units} onSelect={openUnit} />}
 
@@ -263,11 +300,11 @@ export default function App() {
 function UnitSelect({ units, onSelect }) {
   return (
     <div>
-      <h1 style={styles.h1}>練習する単元をえらぼう</h1>
+      <MascotBubble image={mascotSitting}>れんしゅうする たんげんを えらんでね</MascotBubble>
       <div style={styles.grid}>
         {units.map((u) => (
-          <button key={u.id} style={styles.unitBtn} onClick={() => onSelect(u)}>
-            <div style={styles.unitLabel}>{u.label}</div>
+          <button key={u.id} className="pxbtn" style={styles.unitBtn} onClick={() => onSelect(u)}>
+            <div className="pxfont" style={styles.unitLabel}>{u.label}</div>
             <div style={styles.unitSub}>{u.sub}</div>
           </button>
         ))}
@@ -279,10 +316,20 @@ function UnitSelect({ units, onSelect }) {
 // ---------------- ブロック型 ----------------
 
 function BlockLevelSelect({ unit, unitProgress, levelUnlocked, onBack, onSelect }) {
+  const allDone = unitProgress.dictation && unitProgress.overlap && unitProgress.shadow;
+
   return (
     <div>
-      <button style={styles.backBtn} onClick={onBack}>← もどる</button>
-      <h1 style={styles.h1}>{unit.label} <span style={styles.h1sub}>{unit.sub}</span></h1>
+      <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
+      <h1 className="pxfont" style={styles.h1sm}>{unit.label}</h1>
+      <p style={styles.unitSub}>{unit.sub}</p>
+
+      {allDone ? (
+        <MascotBubble image={mascotLying}>ぜんぶ おわったね、おつかれさま！</MascotBubble>
+      ) : (
+        <MascotBubble image={mascotSitting}>じゅんばんに すすめよう</MascotBubble>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {LEVEL_ORDER.map((key) => {
           const meta = LEVEL_META[key];
@@ -291,19 +338,19 @@ function BlockLevelSelect({ unit, unitProgress, levelUnlocked, onBack, onSelect 
           return (
             <button
               key={key}
+              className="pxbtn"
               disabled={!unlocked}
               style={{
                 ...styles.levelBtn,
-                opacity: unlocked ? 1 : 0.45,
+                opacity: unlocked ? 1 : 0.5,
                 cursor: unlocked ? "pointer" : "not-allowed",
-                borderColor: done ? "#2f9e6f" : "#d8d3c4",
+                borderColor: done ? PALETTE.ink : PALETTE.tan,
               }}
               onClick={() => unlocked && onSelect(key)}
             >
-              <span style={{ fontSize: 22 }}>{meta.icon}</span>
-              <span style={{ flex: 1, textAlign: "left", marginLeft: 12 }}>{meta.label}</span>
-              {done && <span style={styles.doneBadge}>提出ずみ</span>}
-              {!unlocked && <span style={styles.lockBadge}>🔒 まだ</span>}
+              <span style={{ flex: 1, textAlign: "left" }}>{meta.label}</span>
+              {done && <span style={styles.doneBadge}>CLEAR</span>}
+              {!unlocked && <span style={styles.lockBadge}>🔒</span>}
             </button>
           );
         })}
@@ -362,11 +409,18 @@ function PerSentenceHome({ unit, unitProgress, onBack, onStart }) {
 
   return (
     <div>
-      <button style={styles.backBtn} onClick={onBack}>← もどる</button>
-      <h1 style={styles.h1}>{unit.label} <span style={styles.h1sub}>{unit.sub}</span></h1>
-      <p style={styles.progressText}>{allDone ? `全${total}文 完了！` : `${finishedCount} / ${total} 文 完了`}</p>
+      <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
+      <h1 className="pxfont" style={styles.h1sm}>{unit.label}</h1>
+      <p style={styles.unitSub}>{unit.sub}</p>
+
+      {allDone ? (
+        <MascotBubble image={mascotLying}>ぜんぶんの れんしゅう おわったよ、すごい！</MascotBubble>
+      ) : (
+        <MascotBubble image={mascotSitting}>{`${finishedCount} / ${total} 文 完了。つづけよう`}</MascotBubble>
+      )}
+
       <p style={styles.modeNote}>文ごと型：1文につき ディクテーション→オーバーラッピング→シャドーイング を通しでやってから次の文へ進みます</p>
-      <button style={styles.primaryBtn} onClick={onStart} disabled={allDone}>
+      <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={onStart} disabled={allDone}>
         {allDone ? "全部おわったよ" : unitProgress.perIndex > 0 ? "つづきから" : "はじめる"}
       </button>
     </div>
@@ -443,9 +497,9 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
 
   return (
     <div>
-      <button style={styles.backBtn} onClick={onBack}>← もどる</button>
-      <h1 style={styles.h1}>{heading}</h1>
-      <button style={styles.playBtn} onClick={() => speak(sentence)}>🔊 音声を聞く</button>
+      <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
+      <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
+      <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => speak(sentence)}>🔊 きく</button>
       <textarea
         style={styles.textarea}
         placeholder="聞こえた英文を入力しよう"
@@ -455,17 +509,17 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
           setStatus(null);
         }}
       />
-      {status === "correct" && <div style={{ ...styles.feedback, background: "#e5f5ec", color: "#1c7a4d" }}>◯ 正解！</div>}
-      {status === "wrong" && <div style={{ ...styles.feedback, background: "#fdecec", color: "#b33a3a" }}>✗ ちがうよ。もう一度聞いて挑戦しよう</div>}
+      {status === "correct" && <div style={{ ...styles.feedback, background: PALETTE.cream, borderColor: PALETTE.ink, color: PALETTE.ink }}>◯ 正解！</div>}
+      {status === "wrong" && <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c" }}>✗ ちがうよ。もう一度聞いて挑戦しよう</div>}
       {missCount >= 5 && !showAnswer && (
-        <button style={styles.hintBtn} onClick={() => setShowAnswer(true)}>答えを見る（5回間違えたので）</button>
+        <button className="pxbtn" style={styles.hintBtn} onClick={() => setShowAnswer(true)}>答えを見る（5回間違えたので）</button>
       )}
       {showAnswer && <div style={styles.answerBox}>{sentence}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {status !== "correct" ? (
-          <button style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
+          <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
         ) : (
-          <button style={styles.primaryBtn} onClick={() => onCorrect(missCount + 1)}>{buttonLabel}</button>
+          <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={() => onCorrect(missCount + 1)}>{buttonLabel}</button>
         )}
       </div>
     </div>
@@ -592,28 +646,29 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
   return (
     <div>
-      <button style={styles.backBtn} onClick={onBack}>← もどる</button>
-      <h1 style={styles.h1}>{heading}</h1>
+      <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
+      <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
 
       {showText ? (
         <div style={styles.sentenceBox}>{sentence}</div>
       ) : (
-        <div style={{ ...styles.sentenceBox, color: "#a89f8a" }}>（文字なし・音声だけをたよりに）</div>
+        <div style={{ ...styles.sentenceBox, color: PALETTE.tanDark }}>（文字なし・音声だけをたよりに）</div>
       )}
 
       <button
-        style={{ ...styles.playBtn, background: recording ? "#e24b4a" : styles.playBtn.background }}
+        className="pxbtn pxfont"
+        style={{ ...styles.playBtn, background: recording ? "#c94a4a" : styles.playBtn.background }}
         onClick={startAttempt}
         disabled={recording}
       >
-        {recording ? "● 録音中…（音声を聞きながら声に出そう）" : "🔊 音声を聞いて録音する"}
+        {recording ? "● ろくおんちゅう…" : "🔊 きいて ろくおん"}
       </button>
 
       <p style={styles.progressText}>録音 {attempts} / 3 回</p>
 
-      {micError && <div style={{ ...styles.feedback, background: "#fdecec", color: "#b33a3a" }}>{micError}</div>}
+      {micError && <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c" }}>{micError}</div>}
       {flags.length > 0 && (
-        <div style={{ ...styles.feedback, background: "#fff6e5", color: "#8a5a00" }}>
+        <div style={{ ...styles.feedback, background: "#fbeecb", borderColor: PALETTE.tanDark, color: "#7a5a1e" }}>
           {flags.join(" / ")}。もう一度録ってみよう
         </div>
       )}
@@ -622,7 +677,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {canSubmit ? (
-          <button style={styles.primaryBtn} onClick={handleSubmit}>{buttonLabel}</button>
+          <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={handleSubmit}>{buttonLabel}</button>
         ) : (
           <div style={styles.hintText}>あと{3 - attempts}回、録音してみよう</div>
         )}
@@ -661,11 +716,11 @@ function FeedbackPanel({ history }) {
   }
 
   return (
-    <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: "#eef2fb" }}>
-      {wordText && <p style={{ margin: "0 0 6px", fontSize: 14, color: "#1e4e8c" }}>{wordText}</p>}
-      <p style={{ margin: "0 0 6px", fontSize: 14, color: "#1e4e8c" }}>{tempoText}</p>
+    <div style={styles.feedbackPanel}>
+      {wordText && <p style={{ margin: "0 0 6px", fontSize: 13, color: PALETTE.ink }}>{wordText}</p>}
+      <p style={{ margin: "0 0 6px", fontSize: 13, color: PALETTE.ink }}>{tempoText}</p>
       {growthLines.map((line, i) => (
-        <p key={i} style={{ margin: "6px 0 0", fontSize: 14, color: "#1c7a4d", fontWeight: 700 }}>
+        <p key={i} style={{ margin: "6px 0 0", fontSize: 13, color: "#2f7a4d", fontWeight: 700 }}>
           ✨ {line}
         </p>
       ))}
@@ -673,28 +728,141 @@ function FeedbackPanel({ history }) {
   );
 }
 
+// ---------------- GB風カラーパレット ----------------
+const PALETTE = {
+  bg: "#2b2440",        // 本体の外側(ゲーム機のボディ風)
+  screenEdge: "#14213d", // 画面の縁(濃紺)
+  cream: "#f7ecd8",      // マスコットのベースカラーに合わせたクリーム
+  tan: "#d8b98a",        // マスコットの陰影色
+  tanDark: "#a9865a",
+  ink: "#1f2233",        // 文字・輪郭(ほぼ黒に近い紺)
+};
+
 const styles = {
-  page: { minHeight: 560, background: "#f4f1ea", display: "flex", justifyContent: "center", padding: "24px 12px", fontFamily: "'Hiragino Sans', 'Yu Gothic', sans-serif" },
-  card: { width: "100%", maxWidth: 460, background: "#ffffff", borderRadius: 20, padding: "24px 22px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" },
-  h1: { fontSize: 20, fontWeight: 700, margin: "0 0 14px", color: "#2c2c2a" },
-  h1sub: { fontSize: 14, fontWeight: 400, color: "#8a8578", marginLeft: 8 },
+  page: {
+    minHeight: 560,
+    background: PALETTE.bg,
+    display: "flex",
+    justifyContent: "center",
+    padding: "24px 12px",
+    fontFamily: "'Hiragino Sans', 'Yu Gothic', sans-serif",
+  },
+  card: {
+    width: "100%",
+    maxWidth: 460,
+    background: PALETTE.cream,
+    border: `4px solid ${PALETTE.ink}`,
+    boxShadow: `6px 6px 0 ${PALETTE.screenEdge}`,
+    padding: "22px 20px",
+  },
+  h1: { fontSize: 15, lineHeight: 1.8, margin: "0 0 14px", color: PALETTE.ink },
+  h1sm: { fontSize: 12, lineHeight: 1.8, margin: "0 0 10px", color: PALETTE.ink },
+  h1sub: { fontSize: 14, fontWeight: 400, color: PALETTE.tanDark, marginLeft: 8 },
   grid: { display: "flex", flexDirection: "column", gap: 12 },
-  unitBtn: { textAlign: "left", padding: "16px 18px", borderRadius: 14, border: "1px solid #e2ddd0", background: "#faf8f3", cursor: "pointer" },
-  unitLabel: { fontSize: 16, fontWeight: 700, color: "#2c2c2a" },
-  unitSub: { fontSize: 13, color: "#8a8578", marginTop: 2 },
-  backBtn: { background: "none", border: "none", color: "#0f6e56", fontSize: 14, padding: 0, marginBottom: 14, cursor: "pointer" },
-  levelBtn: { display: "flex", alignItems: "center", padding: "14px 16px", borderRadius: 14, border: "2px solid #d8d3c4", background: "#fff", fontSize: 15 },
-  doneBadge: { fontSize: 12, background: "#e5f5ec", color: "#1c7a4d", padding: "3px 10px", borderRadius: 8 },
-  lockBadge: { fontSize: 12, color: "#a89f8a" },
-  progressText: { fontSize: 13, color: "#8a8578", marginBottom: 14 },
-  modeNote: { fontSize: 12, color: "#a89f8a", marginTop: 16 },
-  playBtn: { width: "100%", padding: "14px 0", borderRadius: 14, border: "none", background: "#0f6e56", color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", marginBottom: 14 },
-  textarea: { width: "100%", minHeight: 70, borderRadius: 12, border: "1px solid #d8d3c4", padding: 12, fontSize: 15, boxSizing: "border-box", resize: "vertical" },
-  textInput: { width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #d8d3c4", fontSize: 15, boxSizing: "border-box", marginBottom: 14 },
-  sentenceBox: { padding: "18px 16px", borderRadius: 12, background: "#f4f1ea", fontSize: 16, marginBottom: 14, lineHeight: 1.6 },
-  feedback: { padding: "10px 14px", borderRadius: 10, fontSize: 14, marginTop: 12 },
-  hintBtn: { marginTop: 10, background: "none", border: "1px solid #d8d3c4", borderRadius: 10, padding: "8px 12px", fontSize: 13, color: "#8a5a00", cursor: "pointer" },
-  answerBox: { marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "#eef2fb", color: "#1e4e8c", fontSize: 14 },
-  primaryBtn: { flex: 1, padding: "12px 0", borderRadius: 12, border: "none", background: "#2c2c2a", color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer" },
-  hintText: { fontSize: 13, color: "#8a8578", padding: "10px 0" },
+  unitBtn: {
+    textAlign: "left",
+    padding: "14px 16px",
+    border: `3px solid ${PALETTE.ink}`,
+    boxShadow: `3px 3px 0 ${PALETTE.tanDark}`,
+    background: "#fff",
+    cursor: "pointer",
+  },
+  unitLabel: { fontSize: 12, color: PALETTE.ink, marginBottom: 6 },
+  unitSub: { fontSize: 13, color: PALETTE.tanDark, marginTop: 2, marginBottom: 12 },
+  backBtn: {
+    background: "none",
+    border: "none",
+    color: PALETTE.ink,
+    fontSize: 14,
+    padding: 0,
+    marginBottom: 14,
+    cursor: "pointer",
+    textDecoration: "underline",
+  },
+  levelBtn: {
+    display: "flex",
+    alignItems: "center",
+    padding: "14px 16px",
+    border: `3px solid ${PALETTE.tan}`,
+    boxShadow: `3px 3px 0 ${PALETTE.tanDark}`,
+    background: "#fff",
+    fontSize: 14,
+  },
+  doneBadge: {
+    fontSize: 10,
+    fontFamily: "'Press Start 2P', sans-serif",
+    background: PALETTE.ink,
+    color: PALETTE.cream,
+    padding: "4px 8px",
+  },
+  lockBadge: { fontSize: 14 },
+  progressText: { fontSize: 13, color: PALETTE.tanDark, marginBottom: 14 },
+  modeNote: { fontSize: 12, color: PALETTE.tanDark, marginTop: 16, marginBottom: 16, lineHeight: 1.6 },
+  playBtn: {
+    width: "100%",
+    padding: "14px 0",
+    border: `3px solid ${PALETTE.ink}`,
+    boxShadow: `3px 3px 0 ${PALETTE.ink}`,
+    background: PALETTE.tan,
+    color: PALETTE.ink,
+    fontSize: 13,
+    cursor: "pointer",
+    marginBottom: 14,
+  },
+  textarea: {
+    width: "100%",
+    minHeight: 70,
+    border: `2px solid ${PALETTE.ink}`,
+    padding: 12,
+    fontSize: 15,
+    boxSizing: "border-box",
+    resize: "vertical",
+    fontFamily: "'Hiragino Sans', 'Yu Gothic', sans-serif",
+  },
+  textInput: {
+    width: "100%",
+    padding: "12px 14px",
+    border: `2px solid ${PALETTE.ink}`,
+    fontSize: 15,
+    boxSizing: "border-box",
+    marginBottom: 14,
+  },
+  sentenceBox: {
+    padding: "18px 16px",
+    border: `2px dashed ${PALETTE.tanDark}`,
+    background: "#fffaf0",
+    fontSize: 16,
+    marginBottom: 14,
+    lineHeight: 1.6,
+  },
+  feedback: { padding: "10px 14px", border: "2px solid", fontSize: 14, marginTop: 12 },
+  feedbackPanel: { marginTop: 12, padding: "12px 14px", border: `2px solid ${PALETTE.tan}`, background: "#fffaf0" },
+  hintBtn: {
+    marginTop: 10,
+    background: "#fff",
+    border: `2px solid ${PALETTE.tanDark}`,
+    padding: "8px 12px",
+    fontSize: 13,
+    color: "#7a5a1e",
+    cursor: "pointer",
+  },
+  answerBox: { marginTop: 10, padding: "10px 14px", border: `2px solid ${PALETTE.ink}`, background: "#fff", color: PALETTE.ink, fontSize: 14 },
+  primaryBtn: {
+    flex: 1,
+    padding: "13px 0",
+    border: `3px solid ${PALETTE.ink}`,
+    boxShadow: `3px 3px 0 ${PALETTE.ink}`,
+    background: PALETTE.ink,
+    color: PALETTE.cream,
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  hintText: { fontSize: 13, color: PALETTE.tanDark, padding: "10px 0" },
+  speechBubble: {
+    flex: 1,
+    border: `2px solid ${PALETTE.ink}`,
+    background: "#fff",
+    padding: "10px 12px",
+    position: "relative",
+  },
 };

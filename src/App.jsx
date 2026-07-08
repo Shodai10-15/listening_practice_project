@@ -55,6 +55,14 @@ function normalize(s) {
   return s.toLowerCase().replace(/[.,!?]/g, "").replace(/\s+/g, " ").trim();
 }
 
+// 全角の数字・記号を半角に変換する（出席番号の入力ゆれ対策）
+function toHalfWidth(str) {
+  return str
+    .replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/\u3000/g, " ")
+    .trim();
+}
+
 function wordMatchDetail(recognizedText, target) {
   const wa = normalize(recognizedText).split(" ").filter(Boolean);
   const wb = normalize(target).split(" ").filter(Boolean);
@@ -284,7 +292,8 @@ export default function App() {
 
   async function uploadSubmission({ unitId, sentenceNo, level, attemptNo, blob, durationSec, volumeFlag, durationFlag, matchScore }) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `${confirmedClassNo}_${unitId}_${level}_${sentenceNo}_${attemptNo}_${ts}.webm`;
+    const safeClassNo = toHalfWidth(confirmedClassNo).replace(/[^\w\-]/g, "-");
+    const fileName = `${safeClassNo}_${unitId}_${level}_${sentenceNo}_${attemptNo}_${ts}.webm`;
     const path = `${unitId}/${level}/${fileName}`;
 
     const { error: uploadError } = await supabase.storage.from("recordings").upload(path, blob, {
@@ -326,7 +335,7 @@ export default function App() {
         <button
           className="pxbtn pxfont"
           style={styles.primaryBtn}
-          onClick={() => classNo.trim() && setConfirmedClassNo(classNo.trim())}
+          onClick={() => classNo.trim() && setConfirmedClassNo(toHalfWidth(classNo.trim()))}
         >
           はじめる
         </button>
@@ -1012,4 +1021,3 @@ const styles = {
     position: "relative",
   },
 };
-

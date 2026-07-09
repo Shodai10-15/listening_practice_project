@@ -2,14 +2,20 @@ import React, { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import mascotSitting from "./assets/mascot-sitting.png";
 import mascotLying from "./assets/mascot-lying.png";
-import mascotHappy from "./assets/mascot-happy.png";
 import mascotBaby from "./assets/mascot-baby.png";
+import mascotS1Cel from "./assets/mascot-s1-cel.jpg";
+import mascotS2Cel from "./assets/mascot-happy.png"; // ②の正解ポーズ専用画像ができるまでの仮の代用
+import mascotS3Idle from "./assets/mascot-s3-idle.png";
+import mascotS3Cel from "./assets/mascot-s3-cel.png";
+import mascotS4Idle from "./assets/mascot-s4-idle.png";
+import mascotS4Cel from "./assets/mascot-s4-cel.png";
 
 // 経験値による成長ステージの定義（進化するほど必要経験値が大きく増える）
 const GROWTH_STAGES = [
-  { stage: 1, min: 0, next: 15, img: mascotBaby, label: "タマゴ" },
-  { stage: 2, min: 15, next: 50, img: mascotSitting, label: "せいちょう中" },
-  { stage: 3, min: 50, next: null, img: mascotHappy, label: "しんかごのすがた" },
+  { stage: 1, min: 0, next: 15, idleImg: mascotBaby, celImg: mascotS1Cel, label: "タマゴ" },
+  { stage: 2, min: 15, next: 50, idleImg: mascotSitting, celImg: mascotS2Cel, label: "せいちょう中" },
+  { stage: 3, min: 50, next: 120, idleImg: mascotS3Idle, celImg: mascotS3Cel, label: "たのもしいすがた" },
+  { stage: 4, min: 120, next: null, idleImg: mascotS4Idle, celImg: mascotS4Cel, label: "さいだいしんか" },
 ];
 
 function getGrowthStage(xp) {
@@ -327,7 +333,7 @@ function CornerMascot({ xp }) {
   const stage = getGrowthStage(xp);
   return (
     <img
-      src={stage.img}
+      src={stage.idleImg}
       alt=""
       className="mascot-img"
       style={{ position: "absolute", top: -14, right: -10, width: 46, height: 46, opacity: 0.95 }}
@@ -379,7 +385,7 @@ function CelebrationOverlay({ show, xp }) {
           </span>
         ))}
         <img
-          src={stage.img}
+          src={stage.celImg}
           alt=""
           className="mascot-img"
           style={{ width: 88, height: 88, animation: "popIn 0.5s ease-out" }}
@@ -745,10 +751,10 @@ function GrowthPanel({ xp }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-        <img src={stage.img} alt="マスコット" className="mascot-img" style={{ width: 64, height: 64, flexShrink: 0 }} />
+        <img src={stage.idleImg} alt="マスコット" className="mascot-img" style={{ width: 64, height: 64, flexShrink: 0 }} />
         <div style={styles.speechBubble}>
           <p className="pxfont-body" style={{ margin: "0 0 6px", fontSize: 13, color: PALETTE.ink }}>
-            {stage.stage < 3
+            {stage.stage < 4
               ? `せいちょうレベル ${stage.stage}（${stage.label}）`
               : `さいだいしんか！（${stage.label}）`}
           </p>

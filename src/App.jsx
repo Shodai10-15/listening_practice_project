@@ -5,11 +5,11 @@ import mascotLying from "./assets/mascot-lying.png";
 import mascotHappy from "./assets/mascot-happy.png";
 import mascotBaby from "./assets/mascot-baby.png";
 
-// 経験値による成長ステージの定義
+// 経験値による成長ステージの定義（進化するほど必要経験値が大きく増える）
 const GROWTH_STAGES = [
-  { stage: 1, min: 0, next: 5, img: mascotBaby, label: "タマゴ" },
-  { stage: 2, min: 5, next: 15, img: mascotSitting, label: "せいちょう中" },
-  { stage: 3, min: 15, next: null, img: mascotHappy, label: "しんかごのすがた" },
+  { stage: 1, min: 0, next: 15, img: mascotBaby, label: "タマゴ" },
+  { stage: 2, min: 15, next: 50, img: mascotSitting, label: "せいちょう中" },
+  { stage: 3, min: 50, next: null, img: mascotHappy, label: "しんかごのすがた" },
 ];
 
 function getGrowthStage(xp) {
@@ -19,6 +19,14 @@ function getGrowthStage(xp) {
   }
   return current;
 }
+
+// 再生速度のプリセット（速いほど難しい＝もらえるポイントが多い）
+const SPEED_PRESETS = [
+  { key: "slow", label: "おそい", rate: 0.7, multiplier: 0.5 },
+  { key: "normal", label: "ふつう", rate: 1.0, multiplier: 1 },
+  { key: "fast", label: "はやい", rate: 1.3, multiplier: 2 },
+];
+const DEFAULT_SPEED = SPEED_PRESETS[1];
 
 // ============================================================
 // Supabase接続設定
@@ -33,13 +41,13 @@ const UNIT_META = {
   U3G2: { label: "Unit3-G2", sub: "文房具クイズ" },
 };
 
-function speak(text) {
+function speak(text, rate = 0.95) {
   return new Promise((resolve) => {
     if (!("speechSynthesis" in window)) return resolve();
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "en-US";
-    u.rate = 0.95;
+    u.rate = rate;
     u.onend = resolve;
     u.onerror = resolve;
     window.speechSynthesis.speak(u);
@@ -47,10 +55,12 @@ function speak(text) {
 }
 
 // sentenceオブジェクト({text, audioUrl})を受け取り、MP3があればMP3を、なければTTSを再生する
-function playSentenceAudio(sentenceObj) {
+// rate: 0.7=おそい / 1.0=ふつう / 1.3=はやい（MP3・TTSどちらも同じ仕組みで速度を変えられる）
+function playSentenceAudio(sentenceObj, rate = 1.0) {
   return new Promise((resolve) => {
     if (sentenceObj.audioUrl) {
       const audio = new Audio(sentenceObj.audioUrl);
+      audio.playbackRate = rate;
       let done = false;
       const finish = () => {
         if (done) return;
@@ -60,11 +70,11 @@ function playSentenceAudio(sentenceObj) {
       audio.onended = finish;
       audio.onerror = () => {
         // MP3の読み込みに失敗したらTTSにフォールバック
-        speak(sentenceObj.text).then(finish);
+        speak(sentenceObj.text, rate * 0.95).then(finish);
       };
-      audio.play().catch(() => speak(sentenceObj.text).then(finish));
+      audio.play().catch(() => speak(sentenceObj.text, rate * 0.95).then(finish));
     } else {
-      speak(sentenceObj.text).then(resolve);
+      speak(sentenceObj.text, rate * 0.95).then(resolve);
     }
   });
 }
@@ -189,6 +199,112 @@ function GlobalPixelStyle() {
         50% { transform: scale(1.08); }
       }
     `}</style>
+  );
+}
+
+// 再生速度を選ぶパーツ（④）
+function SpeedSelector({ speedKey, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {SPEED_PRESETS.map((p) => (
+        <button
+          key={p.key}
+          className="pxbtn"
+          onClick={() => onChange(p.key)}
+          style={{
+            ...styles.speedBtn,
+            background: speedKey === p.key ? PALETTE.ink : "#fff",
+            color: speedKey === p.key ? PALETTE.cream : PALETTE.ink,
+          }}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// 再生バー（MP3のみ対応。つまみをドラッグして好きな位置から聞き直せる）
+function AudioScrubber({ sentence, rate }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [curTime, setCurTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const hasAudio = !!sentence.audioUrl;
+
+  useEffect(() => {
+    setPlaying(false);
+    setCurTime(0);
+    setDuration(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }, [sentence]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = rate;
+  }, [rate]);
+
+  async function togglePlay() {
+    if (!hasAudio) {
+      // TTSのみの場合は位置指定ができないので、頭から通しで再生するだけ
+      if (playing) return;
+      setPlaying(true);
+      await speak(sentence.text, rate * 0.95);
+      setPlaying(false);
+      return;
+    }
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+    } else {
+      audio.playbackRate = rate;
+      await audio.play();
+      setPlaying(true);
+    }
+  }
+
+  function handleSeek(e) {
+    const t = Number(e.target.value);
+    setCurTime(t);
+    if (audioRef.current) audioRef.current.currentTime = t;
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {hasAudio && (
+        <audio
+          ref={audioRef}
+          src={sentence.audioUrl}
+          onTimeUpdate={(e) => setCurTime(e.currentTarget.currentTime)}
+          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+          onEnded={() => setPlaying(false)}
+        />
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button className="pxbtn" style={styles.scrubPlayBtn} onClick={togglePlay}>
+          {playing ? "⏸" : "▶"}
+        </button>
+        {hasAudio ? (
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.01}
+            value={curTime}
+            onChange={handleSeek}
+            style={{ flex: 1 }}
+          />
+        ) : (
+          <p style={{ fontSize: 11, color: PALETTE.tanDark, margin: 0 }}>
+            MP3のお手本ができると、ここで好きな位置から聞き直せるようになります
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -350,17 +466,19 @@ export default function App() {
   }
 
   async function loadGrowth() {
-    const { count: correctCount } = await supabase
+    const { data: dictRows } = await supabase
       .from("dictation_answers")
-      .select("*", { count: "exact", head: true })
+      .select("points")
       .eq("class_no", confirmedClassNo)
       .eq("is_correct", true);
-    const { count: submissionCount } = await supabase
+    const { data: subRows } = await supabase
       .from("submissions")
-      .select("*", { count: "exact", head: true })
+      .select("points")
       .eq("class_no", confirmedClassNo)
       .eq("is_final", true);
-    setXp((correctCount || 0) * 1 + (submissionCount || 0) * 2);
+    const dictXp = (dictRows || []).reduce((sum, r) => sum + (r.points ?? 1), 0);
+    const subXp = (subRows || []).reduce((sum, r) => sum + (r.points ?? 2), 0);
+    setXp(dictXp + subXp);
   }
 
   async function loadSentences() {
@@ -392,8 +510,38 @@ export default function App() {
 
   const unitProgress = unit ? progress[unit.id] || freshProgress() : freshProgress();
 
-  function openUnit(u) {
+  // ブラウザを閉じても続きから再開できるよう、Supabaseの記録から進捗を復元する（②）
+  async function deriveUnitProgress(u) {
+    const total = u.sentences.length;
+    const [{ data: dictRows }, { data: subRows }] = await Promise.all([
+      supabase.from("dictation_answers").select("sentence_no").eq("class_no", confirmedClassNo).eq("unit", u.id).eq("is_correct", true),
+      supabase.from("submissions").select("sentence_no, level").eq("class_no", confirmedClassNo).eq("unit", u.id).eq("is_final", true),
+    ]);
+    const dictSet = new Set((dictRows || []).map((r) => r.sentence_no));
+    const overlapSet = new Set((subRows || []).filter((r) => r.level === "overlap").map((r) => r.sentence_no));
+    const shadowSet = new Set((subRows || []).filter((r) => r.level === "shadow").map((r) => r.sentence_no));
+
+    if (u.practiceMode === "block") {
+      return {
+        dictation: dictSet.size >= total,
+        overlap: overlapSet.size >= total,
+        shadow: shadowSet.size >= total,
+        perIndex: 0,
+        perStage: "dictation",
+      };
+    }
+    for (let i = 0; i < total; i++) {
+      if (!dictSet.has(i)) return { dictation: false, overlap: false, shadow: false, perIndex: i, perStage: "dictation" };
+      if (!overlapSet.has(i)) return { dictation: false, overlap: false, shadow: false, perIndex: i, perStage: "overlap" };
+      if (!shadowSet.has(i)) return { dictation: false, overlap: false, shadow: false, perIndex: i, perStage: "shadow" };
+    }
+    return { dictation: true, overlap: true, shadow: true, perIndex: total, perStage: "dictation" };
+  }
+
+  async function openUnit(u) {
     setUnit(u);
+    const derived = await deriveUnitProgress(u);
+    setProgress((p) => ({ ...p, [u.id]: derived }));
     setScreen("levels");
   }
 
@@ -408,7 +556,7 @@ export default function App() {
     return false;
   }
 
-  async function recordDictationAnswer({ unitId, sentenceNo, answerText, isCorrect, attemptCount }) {
+  async function recordDictationAnswer({ unitId, sentenceNo, answerText, isCorrect, attemptCount, speedMultiplier = 1 }) {
     await supabase.from("dictation_answers").insert({
       class_no: confirmedClassNo,
       unit: unitId,
@@ -416,11 +564,12 @@ export default function App() {
       answer_text: answerText,
       is_correct: isCorrect,
       attempt_count: attemptCount,
+      points: isCorrect ? 1 * speedMultiplier : 0,
       completed_at: isCorrect ? new Date().toISOString() : null,
     });
   }
 
-  async function uploadSubmission({ unitId, sentenceNo, level, attemptNo, blob, durationSec, volumeFlag, durationFlag, matchScore }) {
+  async function uploadSubmission({ unitId, sentenceNo, level, attemptNo, blob, durationSec, volumeFlag, durationFlag, matchScore, speedMultiplier = 1 }) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const safeClassNo = toHalfWidth(confirmedClassNo).replace(/[^\w\-]/g, "-");
     const fileName = `${safeClassNo}_${unitId}_${level}_${sentenceNo}_${attemptNo}_${ts}.webm`;
@@ -445,6 +594,7 @@ export default function App() {
       volume_flag: volumeFlag,
       duration_flag: durationFlag,
       match_score: matchScore,
+      points: 2 * speedMultiplier,
       is_final: true,
     });
   }
@@ -679,8 +829,8 @@ function BlockPractice({ unit, level, xp, onBack, onAllComplete, recordDictation
         sentence={sentences[idx]}
         xp={xp}
         onBack={onBack}
-        onCorrect={(attemptCount) => {
-          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx].text, isCorrect: true, attemptCount });
+        onCorrect={(attemptCount, speedMultiplier) => {
+          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx].text, isCorrect: true, attemptCount, speedMultiplier });
           advance();
         }}
         buttonLabel={idx + 1 >= sentences.length ? "完了！レベル選択へ" : "次の文へ"}
@@ -753,8 +903,8 @@ function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComp
         sentence={sentence}
         xp={xp}
         onBack={onBack}
-        onCorrect={(attemptCount) => {
-          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence.text, isCorrect: true, attemptCount });
+        onCorrect={(attemptCount, speedMultiplier) => {
+          recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence.text, isCorrect: true, attemptCount, speedMultiplier });
           goNextStage();
         }}
         buttonLabel="オーバーラッピングへ進む"
@@ -785,6 +935,7 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
   const [missCount, setMissCount] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
+  const [speedKey, setSpeedKey] = useState(DEFAULT_SPEED.key);
 
   useEffect(() => {
     setInput("");
@@ -793,6 +944,8 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
     setShowAnswer(false);
     setCelebrate(false);
   }, [sentence]);
+
+  const speed = SPEED_PRESETS.find((p) => p.key === speedKey) || DEFAULT_SPEED;
 
   function check() {
     const result = isCloseEnough(input, sentence.text);
@@ -813,7 +966,8 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
       <CelebrationOverlay show={celebrate} xp={xp} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
-      <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => playSentenceAudio(sentence)}>🔊 きく</button>
+      <SpeedSelector speedKey={speedKey} onChange={setSpeedKey} />
+      <AudioScrubber sentence={sentence} rate={speed.rate} />
       <textarea
         style={styles.textarea}
         placeholder="聞こえた英文を入力しよう"
@@ -839,7 +993,7 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
         {status !== "correct" && status !== "close" ? (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
         ) : (
-          <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={() => onCorrect(missCount + 1)}>{buttonLabel}</button>
+          <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={() => onCorrect(missCount + 1, speed.multiplier)}>{buttonLabel}</button>
         )}
       </div>
     </div>
@@ -853,6 +1007,7 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
   const [lastRec, setLastRec] = useState(null);
   const [history, setHistory] = useState([]);
   const [micError, setMicError] = useState(null);
+  const [speedKey, setSpeedKey] = useState(DEFAULT_SPEED.key);
 
   useEffect(() => {
     setAttempts(0);
@@ -862,7 +1017,11 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
     setMicError(null);
   }, [sentence, showText]);
 
-  const canSubmit = attempts >= 3;
+  const speed = SPEED_PRESETS.find((p) => p.key === speedKey) || DEFAULT_SPEED;
+
+  // 80%以上の一致率が出て初めて提出可能に（音声認識非対応の場合は3回で提出可）
+  const scoreOk = lastRec && lastRec.matchScore !== null ? lastRec.matchScore >= 0.8 : true;
+  const canSubmit = attempts >= 3 && scoreOk;
 
   async function startAttempt() {
     setFlags([]);
@@ -914,7 +1073,7 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
     recorder.start();
 
     const ttsStart = performance.now();
-    await playSentenceAudio(sentence);
+    await playSentenceAudio(sentence, speed.rate);
     const ttsDurationSec = (performance.now() - ttsStart) / 1000;
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -941,6 +1100,7 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
     const newFlags = [];
     if (volumeFlag) newFlags.push("音が小さいかも");
     if (durationFlag) newFlags.push("時間が短いかも");
+    if (wordMatch && wordMatch.ratio < 0.8) newFlags.push(`一致率${Math.round(wordMatch.ratio * 100)}%（80%以上でクリア）`);
 
     const attemptNo = attempts + 1;
     const record = { attemptNo, wordMatch, activeSpeechSec, ttsDurationSec };
@@ -961,6 +1121,7 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
       volumeFlag: lastRec.volumeFlag,
       durationFlag: lastRec.durationFlag,
       matchScore: lastRec.matchScore,
+      speedMultiplier: speed.multiplier,
     });
   }
 
@@ -976,6 +1137,8 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
         <div style={{ ...styles.sentenceBox, color: PALETTE.tanDark }}>（文字なし・音声だけをたよりに）</div>
       )}
 
+      <SpeedSelector speedKey={speedKey} onChange={setSpeedKey} />
+
       <button
         className="pxbtn pxfont"
         style={{ ...styles.playBtn, background: recording ? "#c94a4a" : styles.playBtn.background }}
@@ -985,7 +1148,11 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
         {recording ? "● ろくおんちゅう…" : "🔊 きいて ろくおん"}
       </button>
 
-      <p style={styles.progressText}>録音 {attempts} / 3 回</p>
+
+      <p style={styles.progressText}>
+        録音 {attempts} / 3 回
+        {lastRec && lastRec.matchScore !== null && `　／　一致率 ${Math.round(lastRec.matchScore * 100)}%（目標80%）`}
+      </p>
 
       {micError && <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c" }}>{micError}</div>}
       {flags.length > 0 && (
@@ -1000,7 +1167,9 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
         {canSubmit ? (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={handleSubmit}>{buttonLabel}</button>
         ) : (
-          <div style={styles.hintText}>あと{3 - attempts}回、録音してみよう</div>
+          <div style={styles.hintText}>
+            {attempts < 3 ? `あと${3 - attempts}回、録音してみよう` : "一致率80%を目指して、もう一度録ってみよう"}
+          </div>
         )}
       </div>
     </div>
@@ -1196,6 +1365,31 @@ const styles = {
     cursor: "pointer",
   },
   hintText: { fontSize: 13, color: PALETTE.tanDark, padding: "10px 0" },
+  speedBtn: {
+    flex: 1,
+    padding: "8px 0",
+    border: `2px solid ${PALETTE.ink}`,
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  scrubPlayBtn: {
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    border: `2px solid ${PALETTE.ink}`,
+    background: PALETTE.tan,
+    color: PALETTE.ink,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+  wordBtn: {
+    padding: "6px 10px",
+    border: `1px solid ${PALETTE.tanDark}`,
+    background: "#fff",
+    color: PALETTE.ink,
+    fontSize: 13,
+    cursor: "pointer",
+  },
   speechBubble: {
     flex: 1,
     border: `2px solid ${PALETTE.ink}`,

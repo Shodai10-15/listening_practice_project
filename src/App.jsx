@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import mascotSitting from "./assets/mascot-sitting.png";
 import mascotLying from "./assets/mascot-lying.png";
+import mascotHappy from "./assets/mascot-happy.png";
 
 // ============================================================
 // Supabase接続設定
@@ -244,7 +245,7 @@ function CelebrationOverlay({ show }) {
           </span>
         ))}
         <img
-          src={mascotSitting}
+          src={mascotHappy}
           alt=""
           className="mascot-img"
           style={{ width: 88, height: 88, animation: "popIn 0.5s ease-out" }}

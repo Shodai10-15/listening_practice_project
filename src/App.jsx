@@ -28,9 +28,9 @@ function getGrowthStage(xp) {
 
 // 再生速度のプリセット（速いほど難しい＝もらえるポイントが多い）
 const SPEED_PRESETS = [
-  { key: "slow", label: "おそい", rate: 0.7, multiplier: 0.5 },
-  { key: "normal", label: "ふつう", rate: 1.0, multiplier: 1 },
-  { key: "fast", label: "はやい", rate: 1.3, multiplier: 2 },
+  { key: "slow", label: "おそい", rate: 0.5, multiplier: 0.5 },
+  { key: "normal", label: "ふつう", rate: 0.7, multiplier: 1 },
+  { key: "fast", label: "はやい", rate: 1.0, multiplier: 2 },
 ];
 const DEFAULT_SPEED = SPEED_PRESETS[1];
 

@@ -3,6 +3,22 @@ import { createClient } from "@supabase/supabase-js";
 import mascotSitting from "./assets/mascot-sitting.png";
 import mascotLying from "./assets/mascot-lying.png";
 import mascotHappy from "./assets/mascot-happy.png";
+import mascotBaby from "./assets/mascot-baby.png";
+
+// 経験値による成長ステージの定義
+const GROWTH_STAGES = [
+  { stage: 1, min: 0, next: 5, img: mascotBaby, label: "タマゴ" },
+  { stage: 2, min: 5, next: 15, img: mascotSitting, label: "せいちょう中" },
+  { stage: 3, min: 15, next: null, img: mascotHappy, label: "しんかごのすがた" },
+];
+
+function getGrowthStage(xp) {
+  let current = GROWTH_STAGES[0];
+  for (const s of GROWTH_STAGES) {
+    if (xp >= s.min) current = s;
+  }
+  return current;
+}
 
 // ============================================================
 // Supabase接続設定
@@ -190,11 +206,12 @@ function MascotBubble({ image, children, size = 64 }) {
   );
 }
 
-// 練習画面の隅にいつも居る、小さいマスコット
-function CornerMascot() {
+// 練習画面の隅にいつも居る、小さいマスコット（育てている段階の姿になる）
+function CornerMascot({ xp }) {
+  const stage = getGrowthStage(xp);
   return (
     <img
-      src={mascotSitting}
+      src={stage.img}
       alt=""
       className="mascot-img"
       style={{ position: "absolute", top: -14, right: -10, width: 46, height: 46, opacity: 0.95 }}
@@ -202,9 +219,10 @@ function CornerMascot() {
   );
 }
 
-// 正解した瞬間に、短時間だけ出る演出
-function CelebrationOverlay({ show }) {
+// 正解した瞬間に、短時間だけ出る演出（育てている段階の姿がポンっと弾む）
+function CelebrationOverlay({ show, xp }) {
   if (!show) return null;
+  const stage = getGrowthStage(xp);
   const stars = [
     { tx: "-60px", ty: "-50px", delay: "0s" },
     { tx: "60px", ty: "-55px", delay: "0.05s" },
@@ -245,7 +263,7 @@ function CelebrationOverlay({ show }) {
           </span>
         ))}
         <img
-          src={mascotHappy}
+          src={stage.img}
           alt=""
           className="mascot-img"
           style={{ width: 88, height: 88, animation: "popIn 0.5s ease-out" }}
@@ -271,6 +289,9 @@ function CelebrationOverlay({ show }) {
 
 export default function App() {
   const [classNo, setClassNo] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState(null);
+  const [authChecking, setAuthChecking] = useState(false);
   const [confirmedClassNo, setConfirmedClassNo] = useState(null);
 
   const [units, setUnits] = useState(null);
@@ -280,11 +301,67 @@ export default function App() {
   const [unit, setUnit] = useState(null);
   const [level, setLevel] = useState(null);
   const [progress, setProgress] = useState({});
+  const [xp, setXp] = useState(0);
 
   useEffect(() => {
     if (!confirmedClassNo) return;
     loadSentences();
+    loadGrowth();
   }, [confirmedClassNo]);
+
+  // 練習画面から単元選択に戻るたびに、経験値を最新の状態に取り直す
+  useEffect(() => {
+    if (confirmedClassNo && screen === "units") loadGrowth();
+  }, [screen, confirmedClassNo]);
+
+  async function handleLogin() {
+    const cn = toHalfWidth(classNo.trim());
+    const pw = password.trim();
+    setAuthError(null);
+    setAuthChecking(true);
+
+    const { data, error } = await supabase
+      .from("students")
+      .select("class_no, password")
+      .eq("class_no", cn)
+      .maybeSingle();
+
+    if (error) {
+      setAuthError("通信でエラーが起きました。もう一度試してみてね。");
+      setAuthChecking(false);
+      return;
+    }
+
+    if (!data) {
+      // 初めてのログイン → このパスワードで新規登録
+      const { error: insertError } = await supabase.from("students").insert({ class_no: cn, password: pw });
+      if (insertError) {
+        setAuthError("登録でエラーが起きました。先生に聞いてみてね。");
+        setAuthChecking(false);
+        return;
+      }
+      setConfirmedClassNo(cn);
+    } else if (data.password === pw) {
+      setConfirmedClassNo(cn);
+    } else {
+      setAuthError("パスワードが違うよ。もう一度確認してね。");
+    }
+    setAuthChecking(false);
+  }
+
+  async function loadGrowth() {
+    const { count: correctCount } = await supabase
+      .from("dictation_answers")
+      .select("*", { count: "exact", head: true })
+      .eq("class_no", confirmedClassNo)
+      .eq("is_correct", true);
+    const { count: submissionCount } = await supabase
+      .from("submissions")
+      .select("*", { count: "exact", head: true })
+      .eq("class_no", confirmedClassNo)
+      .eq("is_final", true);
+    setXp((correctCount || 0) * 1 + (submissionCount || 0) * 2);
+  }
 
   async function loadSentences() {
     const { data, error } = await supabase
@@ -376,21 +453,34 @@ export default function App() {
   if (!confirmedClassNo) {
     inner = (
       <div style={styles.card}>
-        <MascotBubble image={mascotSitting}>しゅっせきばんごうを おしえてね！</MascotBubble>
-        <h1 className="pxfont" style={styles.h1}>出席番号</h1>
-        <p style={styles.modeNote}>例：2組15番 → 2-15</p>
+        <MascotBubble image={mascotSitting}>しゅっせきばんごうと パスワードを おしえてね！</MascotBubble>
+        <h1 className="pxfont" style={styles.h1}>ログイン</h1>
+        <p style={styles.modeNote}>例：2組15番 → 2-15　／　はじめての人は、好きなパスワードを決めて入力してね</p>
         <input
           style={styles.textInput}
-          placeholder="2-15"
+          placeholder="出席番号（例：2-15）"
           value={classNo}
           onChange={(e) => setClassNo(e.target.value)}
         />
+        <input
+          style={styles.textInput}
+          type="password"
+          placeholder="パスワード"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        {authError && (
+          <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c", marginBottom: 14 }}>
+            {authError}
+          </div>
+        )}
         <button
           className="pxbtn pxfont"
           style={styles.primaryBtn}
-          onClick={() => classNo.trim() && setConfirmedClassNo(toHalfWidth(classNo.trim()))}
+          onClick={handleLogin}
+          disabled={!classNo.trim() || !password.trim() || authChecking}
         >
-          はじめる
+          {authChecking ? "かくにんちゅう…" : "はじめる"}
         </button>
       </div>
     );
@@ -409,7 +499,7 @@ export default function App() {
   } else {
     inner = (
       <div style={styles.card}>
-        {screen === "units" && <UnitSelect units={units} onSelect={openUnit} />}
+        {screen === "units" && <UnitSelect units={units} onSelect={openUnit} xp={xp} />}
 
         {screen === "levels" && unit && unit.practiceMode === "block" && (
           <BlockLevelSelect
@@ -437,6 +527,7 @@ export default function App() {
           <BlockPractice
             unit={unit}
             level={level}
+            xp={xp}
             onBack={() => setScreen("levels")}
             recordDictationAnswer={recordDictationAnswer}
             uploadSubmission={uploadSubmission}
@@ -451,6 +542,7 @@ export default function App() {
           <PerSentencePractice
             unit={unit}
             progress={unitProgress}
+            xp={xp}
             onBack={() => setScreen("levels")}
             onProgress={(patch) => updateUnitProgress(patch)}
             recordDictationAnswer={recordDictationAnswer}
@@ -479,10 +571,10 @@ export default function App() {
   );
 }
 
-function UnitSelect({ units, onSelect }) {
+function UnitSelect({ units, onSelect, xp }) {
   return (
     <div>
-      <MascotBubble image={mascotSitting}>れんしゅうする たんげんを えらんでね</MascotBubble>
+      <GrowthPanel xp={xp} />
       <div style={styles.grid}>
         {units.map((u) => (
           <button key={u.id} className="pxbtn" style={styles.unitBtn} onClick={() => onSelect(u)}>
@@ -490,6 +582,33 @@ function UnitSelect({ units, onSelect }) {
             <div style={styles.unitSub}>{u.sub}</div>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// キャラクターの成長段階を表示するパネル
+function GrowthPanel({ xp }) {
+  const stage = getGrowthStage(xp);
+  const pct = stage.next ? Math.min(100, Math.round(((xp - stage.min) / (stage.next - stage.min)) * 100)) : 100;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <img src={stage.img} alt="マスコット" className="mascot-img" style={{ width: 64, height: 64, flexShrink: 0 }} />
+        <div style={styles.speechBubble}>
+          <p className="pxfont-body" style={{ margin: "0 0 6px", fontSize: 13, color: PALETTE.ink }}>
+            {stage.stage < 3
+              ? `せいちょうレベル ${stage.stage}（${stage.label}）`
+              : `さいだいしんか！（${stage.label}）`}
+          </p>
+          <div style={{ height: 10, background: "#eee2c8", border: `1px solid ${PALETTE.ink}` }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: PALETTE.tan }} />
+          </div>
+          <p className="pxfont-body" style={{ margin: "6px 0 0", fontSize: 11, color: PALETTE.tanDark }}>
+            {stage.next ? `ポイント ${xp} / ${stage.next}（あと${stage.next - xp}で しんか）` : `ポイント ${xp}（さいだいレベル）`}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -542,7 +661,7 @@ function BlockLevelSelect({ unit, unitProgress, levelUnlocked, onBack, onSelect 
   );
 }
 
-function BlockPractice({ unit, level, onBack, onAllComplete, recordDictationAnswer, uploadSubmission }) {
+function BlockPractice({ unit, level, xp, onBack, onAllComplete, recordDictationAnswer, uploadSubmission }) {
   const sentences = unit.sentences;
   const [idx, setIdx] = useState(0);
 
@@ -558,6 +677,7 @@ function BlockPractice({ unit, level, onBack, onAllComplete, recordDictationAnsw
       <SingleDictationView
         heading={header}
         sentence={sentences[idx]}
+        xp={xp}
         onBack={onBack}
         onCorrect={(attemptCount) => {
           recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx].text, isCorrect: true, attemptCount });
@@ -572,6 +692,7 @@ function BlockPractice({ unit, level, onBack, onAllComplete, recordDictationAnsw
       heading={header}
       sentence={sentences[idx]}
       showText={level === "overlap"}
+      xp={xp}
       onBack={onBack}
       onSubmit={(rec) => {
         uploadSubmission({ unitId: unit.id, sentenceNo: idx, level, ...rec });
@@ -609,7 +730,7 @@ function PerSentenceHome({ unit, unitProgress, onBack, onStart }) {
   );
 }
 
-function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete, recordDictationAnswer, uploadSubmission }) {
+function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComplete, recordDictationAnswer, uploadSubmission }) {
   const sentences = unit.sentences;
   const idx = progress.perIndex;
   const stage = progress.perStage;
@@ -630,6 +751,7 @@ function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete
       <SingleDictationView
         heading={header}
         sentence={sentence}
+        xp={xp}
         onBack={onBack}
         onCorrect={(attemptCount) => {
           recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence.text, isCorrect: true, attemptCount });
@@ -644,6 +766,7 @@ function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete
       heading={header}
       sentence={sentence}
       showText={stage === "overlap"}
+      xp={xp}
       onBack={onBack}
       onSubmit={(rec) => {
         uploadSubmission({ unitId: unit.id, sentenceNo: idx, level: stage, ...rec });
@@ -656,7 +779,7 @@ function PerSentencePractice({ unit, progress, onBack, onProgress, onAllComplete
 
 // ---------------- 共通パーツ ----------------
 
-function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel }) {
+function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonLabel }) {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState(null); // null | 'correct' | 'close' | 'wrong'
   const [missCount, setMissCount] = useState(0);
@@ -686,8 +809,8 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
 
   return (
     <div style={{ position: "relative" }}>
-      <CornerMascot />
-      <CelebrationOverlay show={celebrate} />
+      <CornerMascot xp={xp} />
+      <CelebrationOverlay show={celebrate} xp={xp} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
       <button className="pxbtn pxfont" style={styles.playBtn} onClick={() => playSentenceAudio(sentence)}>🔊 きく</button>
@@ -723,7 +846,7 @@ function SingleDictationView({ heading, sentence, onBack, onCorrect, buttonLabel
   );
 }
 
-function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, buttonLabel }) {
+function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, buttonLabel }) {
   const [attempts, setAttempts] = useState(0);
   const [recording, setRecording] = useState(false);
   const [flags, setFlags] = useState([]);
@@ -843,7 +966,7 @@ function SingleRecordView({ heading, sentence, showText, onBack, onSubmit, butto
 
   return (
     <div style={{ position: "relative" }}>
-      <CornerMascot />
+      <CornerMascot xp={xp} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
 

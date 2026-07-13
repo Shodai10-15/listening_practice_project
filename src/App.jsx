@@ -34,6 +34,52 @@ const SPEED_PRESETS = [
 ];
 const DEFAULT_SPEED = SPEED_PRESETS[1];
 
+// アクセサリー定義（AI画像ではなく、コードで直接描くバッジ。進化段階に応じて解放される）
+const ACCESSORIES = [
+  { key: "none", label: "なし", requireStage: 1 },
+  { key: "ribbon", label: "リボン", requireStage: 2 },
+  { key: "star", label: "きらきら", requireStage: 3 },
+  { key: "crown", label: "かんむり", requireStage: 4 },
+];
+
+// キャラクターの右下に小さく重ねるアクセサリーバッジ(SVGを直接描画)
+function AccessoryBadge({ accessoryKey, size = 46 }) {
+  if (!accessoryKey || accessoryKey === "none") return null;
+  const badgeSize = Math.round(size * 0.5);
+  const common = { position: "absolute", right: -4, bottom: -4, width: badgeSize, height: badgeSize };
+
+  if (accessoryKey === "ribbon") {
+    return (
+      <svg viewBox="0 0 24 24" style={common}>
+        <polygon points="12,10 3,4 3,16" fill={PALETTE.tan} stroke={PALETTE.ink} strokeWidth="1.5" />
+        <polygon points="12,10 21,4 21,16" fill={PALETTE.tan} stroke={PALETTE.ink} strokeWidth="1.5" />
+        <circle cx="12" cy="10" r="3" fill={PALETTE.ink} />
+      </svg>
+    );
+  }
+  if (accessoryKey === "star") {
+    return (
+      <svg viewBox="0 0 24 24" style={common}>
+        <polygon
+          points="12,2 15,9 22,9 16.5,13.5 18.5,21 12,16.5 5.5,21 7.5,13.5 2,9 9,9"
+          fill="#f4d35e"
+          stroke={PALETTE.ink}
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+  if (accessoryKey === "crown") {
+    return (
+      <svg viewBox="0 0 24 24" style={common}>
+        <polygon points="3,18 3,9 8,13 12,6 16,13 21,9 21,18" fill="#f4d35e" stroke={PALETTE.ink} strokeWidth="1.5" />
+        <rect x="3" y="18" width="18" height="3" fill={PALETTE.ink} />
+      </svg>
+    );
+  }
+  return null;
+}
+
 // ============================================================
 // Supabase接続設定
 // ============================================================
@@ -372,15 +418,13 @@ function MascotBubble({ image, children, size = 64 }) {
 }
 
 // 練習画面の隅にいつも居る、小さいマスコット（育てている段階の姿になる）
-function CornerMascot({ xp }) {
+function CornerMascot({ xp, accessory }) {
   const stage = getGrowthStage(xp);
   return (
-    <img
-      src={stage.idleImg}
-      alt=""
-      className="mascot-img"
-      style={{ position: "absolute", top: -14, right: -10, width: 46, height: 46, opacity: 0.95 }}
-    />
+    <div style={{ position: "absolute", top: -14, right: -10, width: 46, height: 46 }}>
+      <img src={stage.idleImg} alt="" className="mascot-img" style={{ width: 46, height: 46, opacity: 0.95, display: "block" }} />
+      <AccessoryBadge accessoryKey={accessory} size={46} />
+    </div>
   );
 }
 
@@ -467,6 +511,7 @@ export default function App() {
   const [level, setLevel] = useState(null);
   const [progress, setProgress] = useState({});
   const [xp, setXp] = useState(0);
+  const [accessory, setAccessory] = useState("none");
 
   useEffect(() => {
     if (!confirmedClassNo) return;
@@ -487,7 +532,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("students")
-      .select("class_no, password")
+      .select("class_no, password, accessory")
       .eq("class_no", cn)
       .maybeSingle();
 
@@ -499,19 +544,26 @@ export default function App() {
 
     if (!data) {
       // 初めてのログイン → このパスワードで新規登録
-      const { error: insertError } = await supabase.from("students").insert({ class_no: cn, password: pw });
+      const { error: insertError } = await supabase.from("students").insert({ class_no: cn, password: pw, accessory: "none" });
       if (insertError) {
         setAuthError("登録でエラーが起きました。先生に聞いてみてね。");
         setAuthChecking(false);
         return;
       }
+      setAccessory("none");
       setConfirmedClassNo(cn);
     } else if (data.password === pw) {
+      setAccessory(data.accessory || "none");
       setConfirmedClassNo(cn);
     } else {
       setAuthError("パスワードが違うよ。もう一度確認してね。");
     }
     setAuthChecking(false);
+  }
+
+  async function updateAccessory(key) {
+    setAccessory(key);
+    await supabase.from("students").update({ accessory: key }).eq("class_no", confirmedClassNo);
   }
 
   async function loadGrowth() {
@@ -698,7 +750,24 @@ export default function App() {
   } else {
     inner = (
       <div style={styles.card}>
-        {screen === "units" && <UnitSelect units={units} onSelect={openUnit} xp={xp} />}
+        {screen === "units" && (
+          <UnitSelect
+            units={units}
+            onSelect={openUnit}
+            xp={xp}
+            accessory={accessory}
+            onOpenZukan={() => setScreen("zukan")}
+          />
+        )}
+
+        {screen === "zukan" && (
+          <ZukanScreen
+            xp={xp}
+            accessory={accessory}
+            onSelectAccessory={updateAccessory}
+            onBack={() => setScreen("units")}
+          />
+        )}
 
         {screen === "levels" && unit && unit.practiceMode === "block" && (
           <BlockLevelSelect
@@ -727,6 +796,7 @@ export default function App() {
             unit={unit}
             level={level}
             xp={xp}
+            accessory={accessory}
             onBack={() => setScreen("levels")}
             recordDictationAnswer={recordDictationAnswer}
             uploadSubmission={uploadSubmission}
@@ -742,6 +812,7 @@ export default function App() {
             unit={unit}
             progress={unitProgress}
             xp={xp}
+            accessory={accessory}
             onBack={() => setScreen("levels")}
             onProgress={(patch) => updateUnitProgress(patch)}
             recordDictationAnswer={recordDictationAnswer}
@@ -770,10 +841,13 @@ export default function App() {
   );
 }
 
-function UnitSelect({ units, onSelect, xp }) {
+function UnitSelect({ units, onSelect, xp, accessory, onOpenZukan }) {
   return (
     <div>
-      <GrowthPanel xp={xp} />
+      <GrowthPanel xp={xp} accessory={accessory} />
+      <button className="pxbtn" style={styles.zukanBtn} onClick={onOpenZukan}>
+        📖 ずかん・きせかえ
+      </button>
       <div style={styles.grid}>
         {units.map((u) => (
           <button key={u.id} className="pxbtn" style={styles.unitBtn} onClick={() => onSelect(u)}>
@@ -787,14 +861,17 @@ function UnitSelect({ units, onSelect, xp }) {
 }
 
 // キャラクターの成長段階を表示するパネル
-function GrowthPanel({ xp }) {
+function GrowthPanel({ xp, accessory }) {
   const stage = getGrowthStage(xp);
   const pct = stage.next ? Math.min(100, Math.round(((xp - stage.min) / (stage.next - stage.min)) * 100)) : 100;
 
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-        <img src={stage.idleImg} alt="マスコット" className="mascot-img" style={{ width: 64, height: 64, flexShrink: 0 }} />
+        <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
+          <img src={stage.idleImg} alt="マスコット" className="mascot-img" style={{ width: 64, height: 64, display: "block" }} />
+          <AccessoryBadge accessoryKey={accessory} size={64} />
+        </div>
         <div style={styles.speechBubble}>
           <p className="pxfont-body" style={{ margin: "0 0 6px", fontSize: 13, color: PALETTE.ink }}>
             {stage.stage < 4
@@ -808,6 +885,70 @@ function GrowthPanel({ xp }) {
             {stage.next ? `ポイント ${xp} / ${stage.next}（あと${stage.next - xp}で しんか）` : `ポイント ${xp}（さいだいレベル）`}
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ずかん画面：全段階の一覧（未到達はシルエット）＋アクセサリー選択
+function ZukanScreen({ xp, accessory, onSelectAccessory, onBack }) {
+  const currentStage = getGrowthStage(xp).stage;
+
+  return (
+    <div>
+      <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
+      <h1 className="pxfont" style={styles.h1sm}>ずかん</h1>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+        {GROWTH_STAGES.map((s) => {
+          const unlocked = s.stage <= currentStage;
+          return (
+            <div key={s.stage} style={styles.zukanCard}>
+              <img
+                src={s.idleImg}
+                alt={unlocked ? s.label : "？？？"}
+                className="mascot-img"
+                style={{
+                  width: 64,
+                  height: 64,
+                  filter: unlocked ? "none" : "brightness(0)",
+                  opacity: unlocked ? 1 : 0.85,
+                }}
+              />
+              <p className="pxfont-body" style={{ fontSize: 12, margin: "6px 0 0", color: PALETTE.ink, textAlign: "center" }}>
+                {unlocked ? s.label : "？？？"}
+              </p>
+              <p style={{ fontSize: 10, margin: "2px 0 0", color: PALETTE.tanDark }}>
+                {unlocked ? `${s.min}pt〜` : `${s.min}ptで かいきん`}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <h1 className="pxfont" style={styles.h1sm}>きせかえ</h1>
+      <p style={styles.modeNote}>しんかがすすむと、あたらしいアクセサリーが えらべるようになるよ</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {ACCESSORIES.map((a) => {
+          const unlocked = currentStage >= a.requireStage;
+          const selected = accessory === a.key;
+          return (
+            <button
+              key={a.key}
+              className="pxbtn"
+              disabled={!unlocked}
+              onClick={() => unlocked && onSelectAccessory(a.key)}
+              style={{
+                ...styles.accessoryBtn,
+                opacity: unlocked ? 1 : 0.4,
+                borderColor: selected ? PALETTE.ink : PALETTE.tan,
+                background: selected ? PALETTE.tan : "#fff",
+              }}
+            >
+              {unlocked ? a.label : `🔒 ${a.label}`}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -860,7 +1001,7 @@ function BlockLevelSelect({ unit, unitProgress, levelUnlocked, onBack, onSelect 
   );
 }
 
-function BlockPractice({ unit, level, xp, onBack, onAllComplete, recordDictationAnswer, uploadSubmission }) {
+function BlockPractice({ unit, level, xp, accessory, onBack, onAllComplete, recordDictationAnswer, uploadSubmission }) {
   const sentences = unit.sentences;
   const [idx, setIdx] = useState(0);
 
@@ -877,6 +1018,7 @@ function BlockPractice({ unit, level, xp, onBack, onAllComplete, recordDictation
         heading={header}
         sentence={sentences[idx]}
         xp={xp}
+        accessory={accessory}
         onBack={onBack}
         onCorrect={(attemptCount, speedMultiplier) => {
           recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentences[idx].text, isCorrect: true, attemptCount, speedMultiplier });
@@ -892,6 +1034,7 @@ function BlockPractice({ unit, level, xp, onBack, onAllComplete, recordDictation
       sentence={sentences[idx]}
       showText={level === "overlap"}
       xp={xp}
+      accessory={accessory}
       onBack={onBack}
       onSubmit={(rec) => {
         uploadSubmission({ unitId: unit.id, sentenceNo: idx, level, ...rec });
@@ -929,7 +1072,7 @@ function PerSentenceHome({ unit, unitProgress, onBack, onStart }) {
   );
 }
 
-function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComplete, recordDictationAnswer, uploadSubmission }) {
+function PerSentencePractice({ unit, progress, xp, accessory, onBack, onProgress, onAllComplete, recordDictationAnswer, uploadSubmission }) {
   const sentences = unit.sentences;
   const idx = progress.perIndex;
   const stage = progress.perStage;
@@ -951,6 +1094,7 @@ function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComp
         heading={header}
         sentence={sentence}
         xp={xp}
+        accessory={accessory}
         onBack={onBack}
         onCorrect={(attemptCount, speedMultiplier) => {
           recordDictationAnswer({ unitId: unit.id, sentenceNo: idx, answerText: sentence.text, isCorrect: true, attemptCount, speedMultiplier });
@@ -966,6 +1110,7 @@ function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComp
       sentence={sentence}
       showText={stage === "overlap"}
       xp={xp}
+      accessory={accessory}
       onBack={onBack}
       onSubmit={(rec) => {
         uploadSubmission({ unitId: unit.id, sentenceNo: idx, level: stage, ...rec });
@@ -978,7 +1123,7 @@ function PerSentencePractice({ unit, progress, xp, onBack, onProgress, onAllComp
 
 // ---------------- 共通パーツ ----------------
 
-function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonLabel }) {
+function SingleDictationView({ heading, sentence, xp, accessory, onBack, onCorrect, buttonLabel }) {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState(null); // null | 'correct' | 'close' | 'wrong'
   const [missCount, setMissCount] = useState(0);
@@ -1011,7 +1156,7 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
 
   return (
     <div style={{ position: "relative" }}>
-      <CornerMascot xp={xp} />
+      <CornerMascot xp={xp} accessory={accessory} />
       <CelebrationOverlay show={celebrate} xp={xp} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
@@ -1057,7 +1202,7 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
   );
 }
 
-function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, buttonLabel }) {
+function SingleRecordView({ heading, sentence, showText, xp, accessory, onBack, onSubmit, buttonLabel }) {
   const [attempts, setAttempts] = useState(0);
   const [recording, setRecording] = useState(false);
   const [flags, setFlags] = useState([]);
@@ -1184,7 +1329,7 @@ function SingleRecordView({ heading, sentence, showText, xp, onBack, onSubmit, b
 
   return (
     <div style={{ position: "relative" }}>
-      <CornerMascot xp={xp} />
+      <CornerMascot xp={xp} accessory={accessory} />
       <button className="pxbtn" style={styles.backBtn} onClick={onBack}>← もどる</button>
       <h1 className="pxfont" style={styles.h1sm}>{heading}</h1>
 
@@ -1339,6 +1484,31 @@ const styles = {
   },
   unitLabel: { fontSize: 12, color: PALETTE.ink, marginBottom: 6 },
   unitSub: { fontSize: 13, color: PALETTE.tanDark, marginTop: 2, marginBottom: 12 },
+  zukanBtn: {
+    width: "100%",
+    padding: "10px 0",
+    marginBottom: 16,
+    border: `2px solid ${PALETTE.tanDark}`,
+    background: "#fff",
+    color: PALETTE.ink,
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  zukanCard: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: "12px 8px",
+    border: `2px solid ${PALETTE.tan}`,
+    background: "#fffaf0",
+  },
+  accessoryBtn: {
+    padding: "8px 14px",
+    border: `2px solid ${PALETTE.tan}`,
+    fontSize: 12,
+    color: PALETTE.ink,
+    cursor: "pointer",
+  },
   backBtn: {
     background: "none",
     border: "none",

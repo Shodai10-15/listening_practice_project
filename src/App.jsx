@@ -233,32 +233,71 @@ function SpeedSelector({ speedKey, onChange }) {
 // 再生バー（MP3のみ対応。つまみをドラッグして好きな位置から聞き直せる）
 function AudioScrubber({ sentence, rate }) {
   const audioRef = useRef(null);
+  const utterRef = useRef(null);
+  const baseCharRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [curTime, setCurTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const hasAudio = !!sentence.audioUrl;
 
   useEffect(() => {
-    setPlaying(false);
-    setCurTime(0);
-    setDuration(0);
+    window.speechSynthesis.cancel();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    baseCharRef.current = 0;
+    setPlaying(false);
+    setCurTime(0);
+    setDuration(0);
   }, [sentence]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = rate;
   }, [rate]);
 
+  // 各単語が全体の何文字目から始まるかを計算（TTSの単語単位シーク用）
+  function wordStarts(text) {
+    const starts = [];
+    let idx = 0;
+    for (const w of text.split(" ")) {
+      starts.push(idx);
+      idx += w.length + 1;
+    }
+    return starts;
+  }
+
+  // 指定した文字位置から読み上げ直す（TTSでの「シーク」の代わり）
+  function speakFromChar(charIndex) {
+    window.speechSynthesis.cancel();
+    baseCharRef.current = charIndex;
+    const remaining = sentence.text.slice(charIndex);
+    const u = new SpeechSynthesisUtterance(remaining);
+    u.lang = "en-US";
+    u.rate = rate;
+    u.onboundary = (e) => {
+      if (e.name === "word" || e.name === undefined) setCurTime(baseCharRef.current + e.charIndex);
+    };
+    u.onend = () => setPlaying(false);
+    u.onerror = () => setPlaying(false);
+    utterRef.current = u;
+    window.speechSynthesis.speak(u);
+  }
+
   async function togglePlay() {
     if (!hasAudio) {
-      // TTSのみの場合は位置指定ができないので、頭から通しで再生するだけ
-      if (playing) return;
+      if (playing) {
+        window.speechSynthesis.pause();
+        setPlaying(false);
+        return;
+      }
+      if (window.speechSynthesis.paused && utterRef.current) {
+        window.speechSynthesis.resume();
+        setPlaying(true);
+        return;
+      }
       setPlaying(true);
-      await speak(sentence.text, rate * 0.95);
-      setPlaying(false);
+      speakFromChar(Math.min(Math.round(curTime), Math.max(sentence.text.length - 1, 0)));
       return;
     }
     const audio = audioRef.current;
@@ -276,8 +315,21 @@ function AudioScrubber({ sentence, rate }) {
   function handleSeek(e) {
     const t = Number(e.target.value);
     setCurTime(t);
-    if (audioRef.current) audioRef.current.currentTime = t;
+    if (hasAudio) {
+      if (audioRef.current) audioRef.current.currentTime = t;
+    } else {
+      const starts = wordStarts(sentence.text);
+      let nearest = 0;
+      for (const s of starts) {
+        if (s <= t) nearest = s;
+        else break;
+      }
+      if (playing) speakFromChar(nearest);
+      else baseCharRef.current = nearest;
+    }
   }
+
+  const maxVal = hasAudio ? duration || 0.01 : Math.max(sentence.text.length, 1);
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -294,22 +346,13 @@ function AudioScrubber({ sentence, rate }) {
         <button className="pxbtn" style={styles.scrubPlayBtn} onClick={togglePlay}>
           {playing ? "⏸" : "▶"}
         </button>
-        {hasAudio ? (
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={0.01}
-            value={curTime}
-            onChange={handleSeek}
-            style={{ flex: 1 }}
-          />
-        ) : (
-          <p style={{ fontSize: 11, color: PALETTE.tanDark, margin: 0 }}>
-            MP3のお手本ができると、ここで好きな位置から聞き直せるようになります
-          </p>
-        )}
+        <input type="range" min={0} max={maxVal} step={hasAudio ? 0.01 : 1} value={curTime} onChange={handleSeek} style={{ flex: 1 }} />
       </div>
+      {!hasAudio && (
+        <p style={{ fontSize: 10, color: PALETTE.tanDark, margin: "4px 0 0" }}>
+          読み上げ音声のため、単語の区切り単位で巻き戻し・早送りします（対応ブラウザのみ）
+        </p>
+      )}
     </div>
   );
 }
@@ -982,19 +1025,27 @@ function SingleDictationView({ heading, sentence, xp, onBack, onCorrect, buttonL
           setInput(e.target.value);
           setStatus(null);
         }}
+        onPaste={(e) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
       />
       {status === "correct" && <div style={{ ...styles.feedback, background: PALETTE.cream, borderColor: PALETTE.ink, color: PALETTE.ink }}>◯ 正解！</div>}
       {status === "close" && (
         <div style={{ ...styles.feedback, background: "#fbeecb", borderColor: PALETTE.tanDark, color: "#7a5a1e" }}>
           ◯ 正解！（おしいスペルミスがあったよ。正しいつづりも見ておこう）
-          <div style={{ marginTop: 8, fontWeight: 700 }}>{sentence.text}</div>
+          <div style={{ marginTop: 8, fontWeight: 700, userSelect: "none" }} onCopy={(e) => e.preventDefault()}>
+            {sentence.text}
+          </div>
         </div>
       )}
       {status === "wrong" && <div style={{ ...styles.feedback, background: "#f6dede", borderColor: "#b33a3a", color: "#8a2c2c" }}>✗ ちがうよ。もう一度聞いて挑戦しよう</div>}
       {missCount >= 5 && !showAnswer && (
         <button className="pxbtn" style={styles.hintBtn} onClick={() => setShowAnswer(true)}>答えを見る（5回間違えたので）</button>
       )}
-      {showAnswer && <div style={styles.answerBox}>{sentence.text}</div>}
+      {showAnswer && (
+        <div style={{ ...styles.answerBox, userSelect: "none" }} onCopy={(e) => e.preventDefault()}>
+          {sentence.text}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {status !== "correct" && status !== "close" ? (
           <button className="pxbtn pxfont" style={styles.primaryBtn} onClick={check} disabled={!input.trim()}>答え合わせ</button>
